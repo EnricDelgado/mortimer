@@ -1,0 +1,4 @@
+<div class="u">{{ texto }}</div>
+<div class="a">{{ r.texto }}{% if r.herramientas %}
+<div class="traza">{% for h in r.herramientas %}→ {{ h.modulo }}.{{ h.herramienta }}({{ h.argumentos | tojson }}) {{ 'ok' if h.ok else 'error' }} · {{ h.ms }} ms<br>{% endfor %}</div>{% endif %}</div>
+<input type="hidden" name="conversacion" id="conversacion" value="{{ r.conversacion }}" hx-swap-oob="true">

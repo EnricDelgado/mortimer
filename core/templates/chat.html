@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mortimer</title>
+  <script src="/static/htmx.min.js"></script>
+  <style>
+    :root { --fondo:#f7f6f3; --texto:#1f1f1c; --tenue:#6b6a64; --borde:#dedcd5; --acento:#2f5d50; --burbuja:#fff; }
+    @media (prefers-color-scheme: dark) {
+      :root { --fondo:#1b1b19; --texto:#ecebe6; --tenue:#9b9a93; --borde:#33332f; --acento:#7fb8a6; --burbuja:#252522; }
+    }
+    * { box-sizing: border-box; }
+    body { margin:0; background:var(--fondo); color:var(--texto); font:16px/1.5 system-ui, sans-serif; }
+    main { max-width: 760px; margin: 0 auto; padding: 24px 16px 120px; }
+    header { display:flex; justify-content:space-between; align-items:baseline; gap:12px; flex-wrap:wrap; }
+    h1 { font-size: 20px; margin: 0; }
+    .meta { color: var(--tenue); font-size: 13px; }
+    .modulos span { border:1px solid var(--borde); border-radius:999px; padding:1px 8px; margin-left:4px; }
+    .modulos .error { color:#b5483b; }
+    #turnos { margin-top: 24px; display:flex; flex-direction:column; gap:14px; }
+    .u { align-self:flex-end; background:var(--acento); color:var(--fondo); padding:8px 12px; border-radius:12px; max-width:85%; }
+    .a { align-self:flex-start; background:var(--burbuja); border:1px solid var(--borde); padding:8px 12px; border-radius:12px; max-width:85%; white-space:pre-wrap; }
+    .traza { font-size:12px; color:var(--tenue); margin-top:4px; font-family: ui-monospace, monospace; }
+    form { position:fixed; bottom:0; left:0; right:0; background:var(--fondo); border-top:1px solid var(--borde); padding:12px 16px; }
+    .fila { max-width:760px; margin:0 auto; display:flex; gap:8px; }
+    input[type=text] { flex:1; font:inherit; padding:10px 12px; border:1px solid var(--borde); border-radius:10px; background:var(--burbuja); color:var(--texto); }
+    button { font:inherit; padding:10px 16px; border:0; border-radius:10px; background:var(--acento); color:var(--fondo); cursor:pointer; }
+    .htmx-request button { opacity:.5; }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Mortimer</h1>
+    <div class="meta modulos">modelo <b>{{ modelo }}</b> · módulos:
+      {% for m in modulos %}<span class="{{ m.estado }}" title="{{ m.descripcion or m.error }}">{{ m.nombre if m.estado == 'ok' else 'caído' }}</span>{% else %}<span>ninguno</span>{% endfor %}
+    </div>
+  </header>
+  <div id="turnos"></div>
+</main>
+<form hx-post="/chat" hx-target="#turnos" hx-swap="beforeend"
+      hx-on::after-request="if(event.detail.successful) this.reset()">
+  <input type="hidden" name="conversacion" id="conversacion" value="">
+  <div class="fila">
+    <input type="text" name="texto" placeholder="Escribe a Mortimer…" autocomplete="off" required autofocus>
+    <button type="submit">Enviar</button>
+  </div>
+</form>
+</body>
+</html>

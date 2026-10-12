@@ -1,0 +1,42 @@
+# Despliegue en el equipo de referencia: servidor doméstico siempre encendido
+# (ThinkCentre M910q, Ubuntu Server, CPU sin GPU dedicada). Un `docker compose up -d`
+# levanta el sistema entero, Ollama incluido.
+#
+# En el Mac de desarrollo no se usa este fichero: ./scripts/dev.sh arranca core y
+# módulos en local contra el Ollama nativo (Metal).
+
+services:
+  ollama:
+    image: ollama/ollama:0.40.3
+    restart: unless-stopped
+    environment:
+      OLLAMA_KEEP_ALIVE: "-1"          # modelo siempre cargado: sin carga en frío en cada petición
+      OLLAMA_NUM_PARALLEL: "1"         # un único usuario; en CPU, paralelizar reparte núcleos y memoria
+      OLLAMA_MAX_LOADED_MODELS: "1"
+    volumes: ["ollama:/root/.ollama"]  # modelos descargados (varios GB): disco local, no el NAS
+    ports: ["127.0.0.1:11434:11434"]   # solo accesible desde el propio servidor (benchmark, ollama pull)
+
+  core:
+    build: ./core
+    restart: unless-stopped
+    environment:
+      OLLAMA_URL: http://ollama:11434
+      MODELO: ${MODELO:-qwen3:4b}
+      NUM_CTX: ${NUM_CTX:-8192}
+      MODULOS: "http://prueba:8001"
+      ZONA_HORARIA: Europe/Madrid
+    volumes:
+      # SQLite en disco local del servidor. No ponerlo en una carpeta del NAS montada
+      # por SMB/NFS: los bloqueos de fichero de SQLite no son fiables en red.
+      - "${DATA_LOCAL:-./data}/core:/data"
+    ports: ["${PUERTO_CORE:-8000}:8000"]   # chat accesible desde la red de casa
+    depends_on: [ollama, prueba]
+
+  # Los módulos no publican puertos: solo el core habla con ellos, dentro de la red
+  # interna de Docker (regla 1 de la arquitectura: el core es el único que conoce el mapa).
+  prueba:
+    build: ./modules/prueba
+    restart: unless-stopped
+
+volumes:
+  ollama:
