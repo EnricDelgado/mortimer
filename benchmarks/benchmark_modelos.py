@@ -148,6 +148,8 @@ def main() -> None:
     ap.add_argument("--repeticiones", type=int, default=3)
     ap.add_argument("--think", choices=["true", "false", "omitir"], default="false")
     ap.add_argument("--num-ctx", type=int, default=8192)
+    ap.add_argument("--sin-ronda2", action="store_true",
+                    help="no mide la redacción de la respuesta final: solo la decisión (herramienta + argumentos). Reduce el tiempo a la mitad")
     ap.add_argument("--esquema", choices=["v1", "v2"], default="v2",
                     help="v1: el modelo calcula fechas ISO; v2: el modelo extrae la expresión y el código la resuelve (DA-08)")
     ap.add_argument("--salida", default=str(Path(__file__).resolve().parent / "resultados"))
@@ -189,7 +191,7 @@ def main() -> None:
                             args = json.loads(args)
                         except json.JSONDecodeError:
                             args = {}
-                    if nombre and not error:
+                    if nombre and not error and not a.sin_ronda2:
                         # Segunda ronda: se devuelve un resultado simulado y se mide
                         # cuánto tarda el modelo en redactar la respuesta final.
                         try:
@@ -262,7 +264,7 @@ def main() -> None:
     n = len(CASOS)
     lineas = [
         f"# Spike de modelos — {datetime.now():%d/%m/%Y %H:%M}", "",
-        f"{n} frases × {a.repeticiones} repeticiones por modelo. Temperatura 0, think={a.think}, num_ctx={a.num_ctx}, esquema={a.esquema}. "
+        f"{n} frases × {a.repeticiones} repeticiones por modelo. Temperatura 0, think={a.think}, num_ctx={a.num_ctx}, esquema={a.esquema}{', sin segunda ronda' if a.sin_ronda2 else ''}. "
         f"Fecha de referencia: {DIAS[REFERENCIA.weekday()]} {REFERENCIA:%d/%m/%Y %H:%M}.", "",
         "| Modelo | Herramienta correcta | Argumentos correctos¹ | Llamadas indebidas² | Petición media (s)⁴ | Mediana (s) | P95 (s) | ≤ 10 s (RNF-03) | Decisión⁵ mediana (s) | ≤ 10 s solo decisión⁵ | Prompt³ (ms) | Generación (tok/s) | Carga en frío (s) | RAM (GB) |",
         "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|",
