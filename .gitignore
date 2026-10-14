@@ -3,7 +3,5 @@ __pycache__/
 .venv/
 .env
 data/
-benchmarks/resultados/*/
-!benchmarks/resultados/.gitkeep
 .pytest_cache/
 .DS_Store

@@ -84,7 +84,43 @@ Desarrollo en el Mac (`scripts/dev.sh`, Ollama nativo); despliegue y medición e
 - **Red.** Solo el core publica un puerto en la red de casa; los módulos solo son accesibles en la red interna de Docker. El acceso desde fuera de casa (VPN) y la autenticación del chat quedan pendientes.
 - **Dos arquitecturas.** El Mac es arm64 y el servidor amd64. Las imágenes se construyen en el servidor (`docker compose build`) y no se copian desde el Mac.
 
+## DA-08 · El modelo extrae expresiones de fecha; el código las resuelve · 14/10/2026
+
+**Contexto.** El primer spike (12/10/2026, `benchmarks/resultados/20261012-1935/`) mostró que los modelos de 1,7-4B en el servidor fallan en un punto concreto. Las horas salen casi perfectas: 0 errores en 15 comprobaciones con granite4.1:3b y llama3.2:3b. En cambio, las fechas relativas fallan entre el 50 % y el 70 %: con granite4.1:3b, 33 de 48. Ejemplos: "el jueves" → 18/10, "el sábado" → 19/10, "¿tengo algo el viernes?" → 8-9/10. Pasar de "jueves" a una fecha exige aritmética de calendario, y un modelo pequeño no la hace de forma fiable.
+
+**Alternativas.**
+- A. Un modelo más grande: no cabe en 8 GB con un tiempo aceptable (DA-07).
+- B. Normalizar el texto antes con `dateparser`: probado y descartado, porque no reconoce formas naturales como "el martes a las nueve" o "pasado mañana a las 7 de la tarde" (devuelve `None`).
+- C. Cambiar el esquema de las herramientas: el modelo copia la expresión (`dia: "jueves"`, `hora: "10:00"`, `periodo: "esta semana"`) y un resolvedor determinista calcula la fecha.
+
+**Decisión.** C. El resolvedor está en `modules/calendario/app/fechas.py`, con 41 pruebas. Es una extensión directa de la regla 2 de la arquitectura ("el LLM no toca datos"): el LLM tampoco hace aritmética. Interpreta la intención y extrae las expresiones; el cálculo lo hace código verificable.
+
+**Consecuencias.**
+- La tarea del modelo pasa de calcular a extraer, que es donde rinden los modelos pequeños.
+- Las reglas ambiguas quedan explícitas y documentadas en lugar de depender del modelo. Por ejemplo, "el lunes" dicho un lunes es el de la semana siguiente.
+- Pendiente de verificar con el benchmark v2 (`--esquema v2`), con las mismas frases y las mismas comprobaciones que el v1, de modo que la mejora sea medible.
+
+## Punto de control 14/10/2026 (Incremento 0)
+
+**Criterio (cap. 3):** el núcleo con el modelo elegido es utilizable; si no lo es, se aplica el plan B del spike.
+
+**Resultado:** el bucle núcleo → MCP → módulo funciona, pero **ningún modelo es utilizable tal cual**. El mejor en elegir herramienta (granite4.1:3b, 85 %) solo acierta los argumentos en el 24 % de los casos y supera los 10 s en el 80 % de las peticiones completas.
+
+| Modelo | Herramienta | Argumentos | Petición mediana | ≤ 10 s | Diagnóstico |
+|---|---|---|---|---|---|
+| llama3.2:3b (versión n8n) | 85 % | 41 % | 21,9 s | 5 % | Su plantilla mete las herramientas en el mensaje del usuario, así que la caché de prefijo no sirve: 10,7 s solo en procesar el prompt. Descartado. |
+| qwen3:1.7b | 60 % | 12 % | 5,4 s | 95 % | Rápido, pero en muchas consultas no llama a ninguna herramienta. |
+| qwen3:4b | — | — | — | — | **Medición no válida.** El tag `qwen3:4b` apunta a la variante *thinking* y razonó pese a `think=false`; 26 peticiones agotaron los 300 s. Hay que repetirlo con `qwen3:4b-instruct`. |
+| granite4.1:3b | 85 % | 24 % | 16,0 s | 20 % | Elige bien la herramienta; falla en fechas. Solo la primera ronda: mediana de 7,4 s, 75 % por debajo de 10 s. |
+
+**Se aplica el plan B en dos partes:**
+1. Fechas resueltas en código (DA-08).
+2. Medir la petición sin segunda ronda del modelo, con respuesta redactada por el módulo. Los datos ya lo indican: con una sola ronda, granite4.1:3b pasa del 20 % al 75 % de peticiones por debajo de 10 s.
+
+**Siguiente medición:** benchmark v2 con `granite4.1:3b`, `qwen3:4b-instruct` y `qwen3:1.7b`.
+
 ## Pendiente
 
-- **DA-06 · Modelo core:** se decide con `benchmarks/benchmark_modelos.py` **ejecutado en el servidor** (spike, fase 2).
+- **DA-06 · Modelo core:** primer spike hecho (ver punto de control del 14/10); se decide con el benchmark v2.
+- Segunda ronda opcional: que una herramienta pueda devolver ya la respuesta final para el usuario y el core no tenga que llamar otra vez al modelo.
 - Acceso desde fuera de casa (VPN tipo WireGuard/Tailscale) y autenticación del chat web.

@@ -37,7 +37,9 @@ sys.path.insert(0, str(RAIZ / "core"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from app.orquestador import DIAS, PROMPT_SISTEMA, sellar  # noqa: E402
-from casos import CASOS, HERRAMIENTAS, REFERENCIA, RESULTADOS_SIMULADOS  # noqa: E402
+from casos import CASOS, HERRAMIENTAS, HERRAMIENTAS_V2, REFERENCIA, RESULTADOS_SIMULADOS, a_canonico  # noqa: E402
+
+HERRAMIENTAS_ACTIVAS = HERRAMIENTAS
 
 RE_FECHA = re.compile(r"(\d{4}-\d{2}-\d{2})")
 RE_HORA = re.compile(r"[T ](\d{1,2}):(\d{2})")
@@ -75,7 +77,7 @@ def llamar(http: httpx.Client, url: str, modelo: str, msgs: list[dict], think: b
     cuerpo = {
         "model": modelo, "stream": False, "options": {"temperature": 0, "num_ctx": num_ctx},
         "messages": msgs,
-        "tools": HERRAMIENTAS,
+        "tools": HERRAMIENTAS_ACTIVAS,
     }
     if think is not None:
         cuerpo["think"] = think
@@ -146,9 +148,13 @@ def main() -> None:
     ap.add_argument("--repeticiones", type=int, default=3)
     ap.add_argument("--think", choices=["true", "false", "omitir"], default="false")
     ap.add_argument("--num-ctx", type=int, default=8192)
+    ap.add_argument("--esquema", choices=["v1", "v2"], default="v2",
+                    help="v1: el modelo calcula fechas ISO; v2: el modelo extrae la expresión y el código la resuelve (DA-08)")
     ap.add_argument("--salida", default=str(Path(__file__).resolve().parent / "resultados"))
     a = ap.parse_args()
 
+    global HERRAMIENTAS_ACTIVAS
+    HERRAMIENTAS_ACTIVAS = HERRAMIENTAS_V2 if a.esquema == "v2" else HERRAMIENTAS
     think = None if a.think == "omitir" else a.think == "true"
     modelos = [m.strip() for m in a.modelos.split(",") if m.strip()]
     destino = Path(a.salida) / datetime.now().strftime("%Y%m%d-%H%M")
@@ -195,6 +201,9 @@ def main() -> None:
                         except Exception as e:
                             error = f"ronda 2: {e}"
                     ok_tool = nombre == esperada
+                    args_modelo = args
+                    if a.esquema == "v2" and nombre:
+                        args = a_canonico(nombre, args, REFERENCIA.date())
                     pasados = [comprobar(args, c) for c in checks] if ok_tool else []
                     ok_args = ok_tool and all(pasados)
                     filas.append({
@@ -203,6 +212,7 @@ def main() -> None:
                         "ok_herramienta": int(ok_tool), "ok_argumentos": int(ok_args),
                         "checks_ok": sum(pasados), "checks_total": len(checks),
                         "argumentos": json.dumps(args, ensure_ascii=False),
+                        "argumentos_modelo": json.dumps(args_modelo, ensure_ascii=False),
                         "texto": (msg.get("content") or "")[:200].replace("\n", " "),
                         "ms_total": round(ms, 1),
                         "ms_ronda2": round(ms2, 1),
@@ -216,12 +226,14 @@ def main() -> None:
                         "error": error,
                     })
                     marca = "✓" if ok_args or (ok_tool and not checks) else ("~" if ok_tool else "✗")
-                    print(f"  r{rep} {cid} {marca} {nombre or '-':16} {ms:7.0f}+{ms2:6.0f} ms  {json.dumps(args, ensure_ascii=False)[:70]}")
+                    print(f"  r{rep} {cid} {marca} {nombre or '-':16} {ms:7.0f}+{ms2:6.0f} ms  {json.dumps(args_modelo, ensure_ascii=False)[:70]}")
 
             mias = [f for f in filas if f["modelo"] == modelo]
             con_tool = [f for f in mias if f["esperada"]]
             tiempos = [f["ms_peticion"] for f in mias if f["ms_peticion"] == f["ms_peticion"]]
             limite = sum(1 for t in tiempos if t <= 10_000) / len(tiempos) if tiempos else 0
+            r1 = [f["ms_total"] for f in mias if f["ms_total"] == f["ms_total"]]
+            limite1 = sum(1 for t in r1 if t <= 10_000) / len(r1) if r1 else 0
             gen = [f["tokens_salida"] / (f["ms_salida"] / 1000) for f in mias
                    if f["tokens_salida"] and f["ms_salida"]]
             pre = [f["ms_prompt"] for f in mias if f["ms_prompt"]]
@@ -236,6 +248,8 @@ def main() -> None:
                 "ram_gb": ram, "vram_gb": vram,
                 "carga_s": ms_carga / 1000,
                 "rnf03": limite,
+                "decision_s": statistics.median(r1) / 1000 if r1 else float("nan"),
+                "rnf03_1": limite1,
                 "gen_tok_s": statistics.mean(gen) if gen else float("nan"),
                 "prompt_ms": statistics.median(pre) if pre else float("nan"),
             })
@@ -248,16 +262,16 @@ def main() -> None:
     n = len(CASOS)
     lineas = [
         f"# Spike de modelos — {datetime.now():%d/%m/%Y %H:%M}", "",
-        f"{n} frases × {a.repeticiones} repeticiones por modelo. Temperatura 0, think={a.think}, num_ctx={a.num_ctx}. "
+        f"{n} frases × {a.repeticiones} repeticiones por modelo. Temperatura 0, think={a.think}, num_ctx={a.num_ctx}, esquema={a.esquema}. "
         f"Fecha de referencia: {DIAS[REFERENCIA.weekday()]} {REFERENCIA:%d/%m/%Y %H:%M}.", "",
-        "| Modelo | Herramienta correcta | Argumentos correctos¹ | Llamadas indebidas² | Petición media (s)⁴ | Mediana (s) | P95 (s) | ≤ 10 s (RNF-03) | Prompt³ (ms) | Generación (tok/s) | Carga en frío (s) | RAM (GB) |",
-        "|---|---|---|---|---|---|---|---|---|---|---|---|",
+        "| Modelo | Herramienta correcta | Argumentos correctos¹ | Llamadas indebidas² | Petición media (s)⁴ | Mediana (s) | P95 (s) | ≤ 10 s (RNF-03) | Decisión⁵ mediana (s) | ≤ 10 s solo decisión⁵ | Prompt³ (ms) | Generación (tok/s) | Carga en frío (s) | RAM (GB) |",
+        "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|",
     ]
     for r in resumen:
         ram = f"{r['ram_gb']:.1f}" if r["ram_gb"] else "–"
         lineas.append(
             f"| {r['modelo']} | {r['herramienta']:.0%} | {r['argumentos']:.0%} | {r['falsos_positivos']} "
-            f"| {r['media_s']:.2f} | {r['mediana_s']:.2f} | {r['p95_s']:.2f} | {r['rnf03']:.0%} | {r['prompt_ms']:.0f} "
+            f"| {r['media_s']:.2f} | {r['mediana_s']:.2f} | {r['p95_s']:.2f} | {r['rnf03']:.0%} | {r['decision_s']:.2f} | {r['rnf03_1']:.0%} | {r['prompt_ms']:.0f} "
             f"| {r['gen_tok_s']:.1f} | {r['carga_s']:.1f} | {ram} |"
         )
     lineas += ["",
@@ -265,6 +279,7 @@ def main() -> None:
                "² Veces que llamó a una herramienta en una frase fuera de alcance (N01–N03).",
                "³ Mediana del tiempo de procesado del prompt. Con la caché de prefijo de Ollama solo se procesa la parte nueva; en CPU es el término que más pesa.",
                "⁴ Petición completa: elección de herramienta + redacción de la respuesta final con un resultado simulado. Es el tiempo que percibe el usuario, sin contar el módulo.",
+               "⁵ Solo la primera ronda: elegir herramienta y argumentos. Es el tiempo total si el módulo redacta la respuesta y no se llama al modelo una segunda vez.",
                "", "Detalle por caso en `crudo.csv`; hardware en `entorno.json`."]
     (destino / "resumen.md").write_text("\n".join(lineas), encoding="utf-8")
     print("\n" + "\n".join(lineas))

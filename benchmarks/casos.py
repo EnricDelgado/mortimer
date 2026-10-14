@@ -116,3 +116,76 @@ RESULTADOS_SIMULADOS = {
     "cancelar_evento": '{"cancelado": true, "titulo": "Entrevista", "inicio": "2026-10-15T16:00"}',
     "buscar_huecos": '[{"inicio": "10:00", "fin": "12:00"}, {"inicio": "16:00", "fin": "18:30"}]',
 }
+
+
+# ── Esquema v2 (DA-08): el modelo extrae expresiones, el código calcula fechas ──
+_DIA = ("Día tal como lo dice el usuario, sin calcular la fecha: 'hoy', 'mañana', "
+        "'pasado mañana', un día de la semana ('jueves') o una fecha explícita ('3 de noviembre').")
+_HORA = "Hora en formato 24 h HH:MM, p. ej. '17:00' para 'las cinco de la tarde'."
+
+HERRAMIENTAS_V2 = [
+    {"type": "function", "function": {
+        "name": "crear_evento",
+        "description": "Crea un evento en el calendario del usuario.",
+        "parameters": {"type": "object", "properties": {
+            "titulo": {"type": "string", "description": "Título breve del evento"},
+            "dia": {"type": "string", "description": _DIA},
+            "hora": {"type": "string", "description": _HORA + " Vacío si no se dice."},
+            "hora_fin": {"type": "string", "description": "Hora de fin HH:MM, solo si se dice."},
+            "ubicacion": {"type": "string", "description": "Lugar, solo si se dice."},
+        }, "required": ["titulo", "dia"]},
+    }},
+    {"type": "function", "function": {
+        "name": "listar_eventos",
+        "description": "Consulta la agenda del usuario en un periodo.",
+        "parameters": {"type": "object", "properties": {
+            "periodo": {"type": "string", "description":
+                "Periodo tal como lo dice el usuario: 'hoy', 'mañana', 'esta semana', "
+                "'la semana que viene', 'fin de semana', 'este mes' o un día ('viernes')."},
+        }, "required": ["periodo"]},
+    }},
+    {"type": "function", "function": {
+        "name": "cancelar_evento",
+        "description": "Cancela un evento identificado por su título y su día.",
+        "parameters": {"type": "object", "properties": {
+            "titulo": {"type": "string", "description": "Palabra clave del evento, p. ej. 'dentista'"},
+            "dia": {"type": "string", "description": _DIA},
+        }, "required": ["titulo"]},
+    }},
+    {"type": "function", "function": {
+        "name": "buscar_huecos",
+        "description": "Busca franjas libres en un día para una duración dada.",
+        "parameters": {"type": "object", "properties": {
+            "dia": {"type": "string", "description": _DIA},
+            "duracion_min": {"type": "integer", "description": "Duración en minutos (una hora = 60)"},
+        }, "required": ["dia", "duracion_min"]},
+    }},
+]
+
+
+def a_canonico(nombre: str, args: dict, hoy) -> dict:
+    """Traduce argumentos v2 al formato v1 (ISO) con el resolvedor del módulo
+    Calendario, para puntuarlos con las mismas comprobaciones."""
+    import importlib.util
+    from pathlib import Path
+    ruta = Path(__file__).resolve().parents[1] / "modules" / "calendario" / "app" / "fechas.py"
+    spec = importlib.util.spec_from_file_location("fechas", ruta)
+    f = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(f)
+
+    out = dict(args)
+    iso = lambda x: x.isoformat(timespec="minutes") if x else None
+    if nombre == "crear_evento":
+        ini = f.resolver_momento(args.get("dia"), args.get("hora"), hoy)
+        out["inicio"] = iso(ini)
+        if ini and args.get("hora_fin"):
+            hf = f.resolver_hora(args["hora_fin"])
+            out["fin"] = iso(ini.replace(hour=hf.hour, minute=hf.minute)) if hf else None
+    elif nombre == "listar_eventos":
+        p = f.resolver_periodo(args.get("periodo"), hoy)
+        if p:
+            out["desde"], out["hasta"] = p[0].isoformat(), p[1].isoformat()
+    elif nombre in ("cancelar_evento", "buscar_huecos"):
+        d = f.resolver_dia(args.get("dia"), hoy)
+        out["fecha"] = d.isoformat() if d else None
+    return {k: v for k, v in out.items() if v is not None}

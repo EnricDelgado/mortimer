@@ -61,8 +61,12 @@ Se ejecuta en el servidor, contra el Ollama del compose:
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -r core/requirements.txt
-for m in qwen3:1.7b qwen3:4b granite4.1:3b; do docker compose exec ollama ollama pull $m; done
-.venv/bin/python benchmarks/benchmark_modelos.py --modelos qwen3:1.7b,qwen3:4b,granite4.1:3b
+for m in granite4.1:3b qwen3:4b-instruct qwen3:1.7b; do docker compose exec ollama ollama pull $m; done
+.venv/bin/python benchmarks/benchmark_modelos.py --modelos granite4.1:3b,qwen3:4b-instruct,qwen3:1.7b
 ```
 
-Son 20 frases en castellano (alta, consulta y cancelación de eventos, búsqueda de huecos y peticiones fuera de alcance), con 3 repeticiones por modelo. El resultado se guarda en `benchmarks/resultados/<fecha>/resumen.md`.
+Son 20 frases en castellano (alta, consulta y cancelación de eventos, búsqueda de huecos y peticiones fuera de alcance), con 3 repeticiones por modelo. El resultado se guarda en `benchmarks/resultados/<fecha>/resumen.md`, y los resultados se versionan en el repo como evidencia para la memoria.
+
+Por defecto usa el esquema v2: el modelo extrae expresiones de fecha y `modules/calendario/app/fechas.py` las resuelve (DA-08). Con `--esquema v1` se repite la medición original, en la que el modelo calcula las fechas ISO.
+
+**No uses el tag `qwen3:4b` a secas**: apunta a la variante *thinking*, que razona aunque se le pida `think=false`. Usa `qwen3:4b-instruct`.
