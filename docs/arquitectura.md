@@ -117,10 +117,23 @@ Desarrollo en el Mac (`scripts/dev.sh`, Ollama nativo); despliegue y medición e
 1. Fechas resueltas en código (DA-08).
 2. Medir la petición sin segunda ronda del modelo, con respuesta redactada por el módulo. Los datos ya lo indican: con una sola ronda, granite4.1:3b pasa del 20 % al 75 % de peticiones por debajo de 10 s.
 
-**Siguiente medición:** benchmark v2 con `granite4.1:3b`, `qwen3:4b-instruct` y `qwen3:1.7b`.
+**Verificación (14/10, `benchmarks/resultados/20261014-1927/`):** granite4.1:3b con el esquema v2 elige bien la herramienta el **90 %** de las veces, acierta los argumentos en el **71 %** (antes 24 %) y decide en **5,9 s** de mediana, con el 95 % por debajo de 10 s. **El punto de control se da por superado con el plan B aplicado.**
+
+## DA-06 · Modelo del core: granite4.1:3b con esquema v2 · 14/10/2026
+
+**Alternativas medidas** en el equipo de referencia: llama3.2:3b, qwen3:1.7b, qwen3:4b (variante *thinking*, medición no válida) y granite4.1:3b. Detalle en `benchmarks/resultados/`.
+
+**Decisión.** granite4.1:3b (2,5 GB de RAM), por tres razones: es el que mejor elige herramienta, no hace llamadas indebidas y su decisión cabe en el límite de 10 s del RNF-03. qwen3:4b-instruct queda sin medir: se probará solo si granite no alcanza los criterios de la evaluación final.
+
+**Consecuencias, que van al Incremento 1:**
+- Días de la semana como lista cerrada sin tildes, porque granite corrompe palabras con tilde o ñ.
+- Una descripción de `crear_evento` que cubra "tengo X el…".
+- Búsqueda de títulos sin distinguir tildes.
+- Respuesta redactada por el módulo en las operaciones simples, para no hacer una segunda ronda.
+- Conversación abierta: *streaming* o límite de longitud. Ahora tarda hasta 51 s.
+- La evaluación final usará un banco de frases distinto del del spike, para no sobreajustar.
 
 ## Pendiente
 
-- **DA-06 · Modelo core:** primer spike hecho (ver punto de control del 14/10); se decide con el benchmark v2.
 - Segunda ronda opcional: que una herramienta pueda devolver ya la respuesta final para el usuario y el core no tenga que llamar otra vez al modelo.
 - Acceso desde fuera de casa (VPN tipo WireGuard/Tailscale) y autenticación del chat web.

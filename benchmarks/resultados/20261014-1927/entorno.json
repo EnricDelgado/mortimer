@@ -1,0 +1,10 @@
+{
+  "fecha": "2026-10-14T19:27:55",
+  "plataforma": "Linux-7.0.0-38-generic-x86_64-with-glibc2.43",
+  "maquina": "x86_64",
+  "python": "3.14.4",
+  "ollama": "0.40.3",
+  "cpu": "Intel(R) Core(TM) i5-7500T CPU @ 2.70GHz",
+  "nucleos": 4,
+  "ram_kb": 7487528
+}
