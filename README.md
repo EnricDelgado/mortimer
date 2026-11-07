@@ -2,7 +2,7 @@
 
 Asistente personal **local y modular**. El modelo de lenguaje corre en tu máquina, tus datos se guardan en formatos abiertos que puedes leer sin Mortimer, y las capacidades se amplían con módulos que hablan un protocolo público (MCP).
 
-Este repositorio forma parte de un Trabajo Fin de Máster (TFM). Estado: **Incremento 0**. El núcleo conversa y enruta peticiones a un módulo de prueba.
+Este repositorio forma parte de un Trabajo Fin de Máster (TFM). Estado: **Incremento 0 cerrado**, Incremento 1 (módulo Calendario) en curso. El núcleo conversa y enruta peticiones a un módulo de prueba. Modelo por defecto: `granite4.1:3b` (DA-06).
 
 ## Dónde corre
 
@@ -13,8 +13,10 @@ Mortimer está pensado para un equipo **siempre encendido**. El equipo de refere
 ```bash
 cp .env.example .env
 docker compose up -d --build
-docker compose exec ollama ollama pull qwen3:4b
+docker compose exec ollama ollama pull granite4.1:3b
 ```
+
+Guía completa de instalación y uso: ver `docs/` (en preparación).
 
 ## Mac (desarrollo)
 
@@ -22,7 +24,7 @@ Requiere [Ollama](https://ollama.com) nativo, que usa la GPU vía Metal, y Pytho
 
 ```bash
 ollama serve                 # en otra terminal
-ollama pull qwen3:4b
+ollama pull granite4.1:3b
 ./scripts/dev.sh
 ```
 
@@ -46,6 +48,20 @@ Después abre <http://localhost:8000> y pregunta "¿qué hora es?". Debajo de la
 | GET | `/api/modulos` | Módulos registrados y su estado |
 | POST | `/api/modulos/recargar` | Volver a descubrir módulos sin reiniciar |
 | GET | `/api/interacciones` | Registro de interacciones (datos de la evaluación) |
+| GET | `/health` | Estado, modelo y herramientas disponibles |
+
+## Configuración
+
+Variables de entorno del core (en el servidor, en `.env`):
+
+| Variable | Por defecto | Qué hace |
+|---|---|---|
+| `MODELO` | `granite4.1:3b` | Modelo de Ollama (DA-06) |
+| `NUM_CTX` | `8192` | Ventana de contexto fija: evita recortes silenciosos y recargas del modelo |
+| `NUM_PREDICT` | `160` | Tope de tokens por respuesta (DA-09). Si se alcanza, la respuesta se recorta en la última frase completa y la interacción queda marcada con `truncada=1`. `0` lo desactiva |
+| `OLLAMA_THINK` | `false` | Desactiva el razonamiento en modelos *thinking* |
+| `MAX_RONDAS` | `4` | Rondas máximas de herramientas por petición |
+| `HISTORIAL` | `10` | Mensajes previos de la conversación que se envían al modelo |
 
 ## Pruebas
 

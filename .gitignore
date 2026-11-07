@@ -1,7 +1,156 @@
-__pycache__/
-*.pyc
-.venv/
+# =============================================================================
+# .gitignore de Mortimer
+# El repo es PÚBLICO. Aquí nunca entran:
+#   1. secretos (tokens, contraseñas, claves)
+#   2. datos personales del usuario (agenda, notas, audios, conversaciones)
+#   3. artefactos generados (entornos, cachés, modelos)
+# Si algo de esto aparece en `git status`, NO lo añadas: amplía este fichero.
+# Comprobación: git ls-files -ci --exclude-standard  (debe salir vacío)
+# =============================================================================
+
+# ── 1. Secretos ───────────────────────────────────────────────────────────────
+# Variables de entorno: cualquier .env en cualquier carpeta, salvo las plantillas
 .env
+.env.*
+*.env
+!.env.example
+!**/.env.example
+.envrc
+.direnv/
+
+# Claves, certificados y almacenes de claves
+*.pem
+*.key
+*.crt
+*.cer
+*.der
+*.p12
+*.pfx
+*.jks
+*.keystore
+*.asc
+*.gpg
+id_rsa*
+id_ed25519*
+id_ecdsa*
+*.ppk
+known_hosts
+authorized_keys
+
+# Ficheros de credenciales habituales
+secrets/
+secret/
+.secrets/
+*secret*.json
+*secrets*.json
+*secret*.yml
+*secrets*.yml
+*secret*.yaml
+*secrets*.yaml
+credentials*.json
+client_secret*.json
+service-account*.json
+token.json
+*.token
+.netrc
+.npmrc
+.pypirc
+.git-credentials
+htpasswd
+.htpasswd
+
+# VPN (WireGuard / Tailscale, pendiente): las configuraciones llevan claves privadas
+*.conf.wg
+wg*.conf
+*.ovpn
+
+# Sesiones de bots y servicios (Telegram, Vitácora)
+*.session
+*.session-journal
+
+# Variantes locales de docker compose (suelen llevar valores reales)
+docker-compose.override.yml
+docker-compose.override.yaml
+compose.override.yml
+compose.override.yaml
+docker-compose.local.yml
+
+# ── 2. Datos personales ───────────────────────────────────────────────────────
+# Carpeta de datos de cada despliegue (SQLite del core y de los módulos)
 data/
+data-*/
+**/data/
+# Bases de datos, en cualquier ruta
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+*.sqlite-journal
+# Calendarios generados o descargados (salvo los ficheros de prueba)
+*.ics
+!**/tests/**/*.ics
+# Vault de Vitácora (notas markdown del usuario) y audios de Telegram
+vault/
+**/vault/
+*.ogg
+*.oga
+*.opus
+*.m4a
+*.mp3
+*.wav
+!**/tests/**/*.ogg
+!**/tests/**/*.wav
+# Copias de seguridad y volcados
+backups/
+*.bak
+*.backup
+*.dump
+*.sql.gz
+# Registros (pueden contener peticiones y respuestas del usuario)
+logs/
+*.log
+
+# ── 3. Artefactos generados ───────────────────────────────────────────────────
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+/build/
+/dist/
+.venv/
+venv/
+env/
+.python-version
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.ipynb_checkpoints/
+
+# Modelos descargados (varios GB; viven en el volumen de Ollama)
+*.gguf
+*.safetensors
+*.bin
+/models/
+
+# Editores y sistema operativo
 .DS_Store
+.AppleDouble
+._*
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Temporales
+tmp/
+*.tmp

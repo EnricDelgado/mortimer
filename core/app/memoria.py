@@ -37,7 +37,8 @@ CREATE TABLE IF NOT EXISTS interacciones (
     t_llm_ms       REAL NOT NULL,
     t_modulos_ms   REAL NOT NULL,
     t_total_ms     REAL NOT NULL,
-    error          TEXT
+    error          TEXT,
+    truncada       INTEGER NOT NULL DEFAULT 0   -- 1 si la respuesta se cortó por num_predict (DA-09)
 );
 """
 
@@ -49,6 +50,14 @@ class Memoria:
         self._db = sqlite3.connect(ruta, check_same_thread=False)
         self._db.row_factory = sqlite3.Row
         self._db.executescript(ESQUEMA)
+        self._migrar()
+
+    def _migrar(self) -> None:
+        # Bases creadas antes de DA-09 (Incremento 0) no tienen la columna.
+        columnas = {f["name"] for f in self._db.execute("PRAGMA table_info(interacciones)")}
+        if "truncada" not in columnas:
+            self._db.execute("ALTER TABLE interacciones ADD COLUMN truncada INTEGER NOT NULL DEFAULT 0")
+            self._db.commit()
 
     @staticmethod
     def _ahora() -> str:

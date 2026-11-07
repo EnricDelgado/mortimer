@@ -40,6 +40,7 @@ from app.orquestador import DIAS, PROMPT_SISTEMA, sellar  # noqa: E402
 from casos import CASOS, HERRAMIENTAS, HERRAMIENTAS_V2, REFERENCIA, RESULTADOS_SIMULADOS, a_canonico  # noqa: E402
 
 HERRAMIENTAS_ACTIVAS = HERRAMIENTAS
+NUM_PREDICT = 0  # 0 = sin tope; el core usa NUM_PREDICT=160 (DA-09)
 
 RE_FECHA = re.compile(r"(\d{4}-\d{2}-\d{2})")
 RE_HORA = re.compile(r"[T ](\d{1,2}):(\d{2})")
@@ -79,6 +80,8 @@ def llamar(http: httpx.Client, url: str, modelo: str, msgs: list[dict], think: b
         "messages": msgs,
         "tools": HERRAMIENTAS_ACTIVAS,
     }
+    if NUM_PREDICT > 0:
+        cuerpo["options"]["num_predict"] = NUM_PREDICT
     if think is not None:
         cuerpo["think"] = think
     t = time.perf_counter()
@@ -152,11 +155,14 @@ def main() -> None:
                     help="no mide la redacción de la respuesta final: solo la decisión (herramienta + argumentos). Reduce el tiempo a la mitad")
     ap.add_argument("--esquema", choices=["v1", "v2"], default="v2",
                     help="v1: el modelo calcula fechas ISO; v2: el modelo extrae la expresión y el código la resuelve (DA-08)")
+    ap.add_argument("--num-predict", type=int, default=0,
+                    help="tope de tokens de salida; 160 reproduce la configuración del core (DA-09). 0 = sin tope")
     ap.add_argument("--salida", default=str(Path(__file__).resolve().parent / "resultados"))
     a = ap.parse_args()
 
-    global HERRAMIENTAS_ACTIVAS
+    global HERRAMIENTAS_ACTIVAS, NUM_PREDICT
     HERRAMIENTAS_ACTIVAS = HERRAMIENTAS_V2 if a.esquema == "v2" else HERRAMIENTAS
+    NUM_PREDICT = a.num_predict
     think = None if a.think == "omitir" else a.think == "true"
     modelos = [m.strip() for m in a.modelos.split(",") if m.strip()]
     destino = Path(a.salida) / datetime.now().strftime("%Y%m%d-%H%M")
@@ -264,7 +270,7 @@ def main() -> None:
     n = len(CASOS)
     lineas = [
         f"# Spike de modelos — {datetime.now():%d/%m/%Y %H:%M}", "",
-        f"{n} frases × {a.repeticiones} repeticiones por modelo. Temperatura 0, think={a.think}, num_ctx={a.num_ctx}, esquema={a.esquema}{', sin segunda ronda' if a.sin_ronda2 else ''}. "
+        f"{n} frases × {a.repeticiones} repeticiones por modelo. Temperatura 0, think={a.think}, num_ctx={a.num_ctx}, num_predict={a.num_predict or 'sin tope'}, esquema={a.esquema}{', sin segunda ronda' if a.sin_ronda2 else ''}. "
         f"Fecha de referencia: {DIAS[REFERENCIA.weekday()]} {REFERENCIA:%d/%m/%Y %H:%M}.", "",
         "| Modelo | Herramienta correcta | Argumentos correctos¹ | Llamadas indebidas² | Petición media (s)⁴ | Mediana (s) | P95 (s) | ≤ 10 s (RNF-03) | Decisión⁵ mediana (s) | ≤ 10 s solo decisión⁵ | Prompt³ (ms) | Generación (tok/s) | Carga en frío (s) | RAM (GB) |",
         "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|",

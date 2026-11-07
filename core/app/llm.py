@@ -26,6 +26,8 @@ class RespuestaLLM:
     llamadas: list[LlamadaHerramienta] = field(default_factory=list)
     mensaje_crudo: dict[str, Any] = field(default_factory=dict)
     metricas: dict[str, Any] = field(default_factory=dict)
+    # True si Ollama cortó la salida por llegar a num_predict (done_reason="length").
+    truncada: bool = False
 
 
 class LLM(Protocol):
@@ -49,11 +51,12 @@ def _argumentos(valor: Any) -> dict[str, Any]:
 
 class OllamaLLM:
     def __init__(self, url: str, modelo: str, think: str = "false", num_ctx: int = 8192,
-                 timeout: float = 300.0):
+                 num_predict: int = 0, timeout: float = 300.0):
         self.url = url.rstrip("/")
         self.modelo = modelo
         self.think = think
         self.num_ctx = num_ctx
+        self.num_predict = num_predict
         self._http = httpx.AsyncClient(timeout=timeout)
 
     async def chat(self, mensajes: list[dict], herramientas: list[dict]) -> RespuestaLLM:
@@ -68,6 +71,11 @@ class OllamaLLM:
             # herramientas. Fijarlo también evita recargar el modelo.
             "options": {"temperature": 0, "num_ctx": self.num_ctx},
         }
+        # Tope de tokens de salida (DA-09). En CPU (~7 tokens/s) una respuesta
+        # larga de conversación tardaba 51 s. Las llamadas a herramienta del
+        # esquema v2 ocupan muy pocos tokens, así que el tope no las afecta.
+        if self.num_predict > 0:
+            cuerpo["options"]["num_predict"] = self.num_predict
         if herramientas:
             cuerpo["tools"] = herramientas
         if self.think in ("true", "false"):
@@ -97,12 +105,14 @@ class OllamaLLM:
             "prompt_ms": datos.get("prompt_eval_duration", 0) / ns,
             "salida_tokens": datos.get("eval_count"),
             "salida_ms": datos.get("eval_duration", 0) / ns,
+            "done_reason": datos.get("done_reason"),
         }
         return RespuestaLLM(
             contenido=msg.get("content", "") or "",
             llamadas=llamadas,
             mensaje_crudo=msg,
             metricas=metricas,
+            truncada=datos.get("done_reason") == "length",
         )
 
     async def cerrar(self) -> None:

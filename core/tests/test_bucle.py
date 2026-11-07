@@ -147,3 +147,51 @@ async def test_prompt_de_sistema_fijo_y_mensaje_sellado(memoria):
     assert llm.recibido[0][0][0] == llm.recibido[1][0][0]
     import re
     assert re.match(r"^\[\w+ \d{2}/\d{2}/\d{4} \d{2}:\d{2}\] dos$", llm.recibido[1][0][-1]["content"])
+
+
+# ── DA-09: tope de longitud en la conversación libre ──────────────────────────
+
+def test_recortar_a_la_ultima_frase_completa():
+    from app.orquestador import recortar
+    texto = "El capitalismo de vigilancia es un modelo económico. Se basa en datos personales. Su origen"
+    assert recortar(texto) == "El capitalismo de vigilancia es un modelo económico. Se basa en datos personales."
+
+
+def test_recortar_sin_frase_completa_marca_el_corte():
+    from app.orquestador import recortar
+    assert recortar("Una respuesta muy larga que no llegó a terminar") == \
+        "Una respuesta muy larga que no llegó a terminar…"
+    # Un punto muy al principio no justifica tirar casi todo el texto.
+    assert recortar("Sí. Y además hay muchísimas otras cosas que contar sobre el tema").endswith("tema…")
+
+
+async def test_respuesta_truncada_se_recorta_y_se_registra(memoria):
+    registro = Registro([])
+    await registro.actualizar()
+    llm = LLMGuion([RespuestaLLM("Primera frase. Segunda frase. Tercera sin acab", truncada=True)])
+    r = await Orquestador(llm, registro, memoria).responder("explícame algo")
+    assert r.texto == "Primera frase. Segunda frase."
+    assert r.truncada is True
+    assert memoria.interacciones()[0]["truncada"] == 1
+
+
+async def test_respuesta_normal_no_se_toca(memoria):
+    registro = Registro([])
+    await registro.actualizar()
+    llm = LLMGuion([RespuestaLLM("Hola. Esto acaba sin punto")])
+    r = await Orquestador(llm, registro, memoria).responder("hola")
+    assert r.texto == "Hola. Esto acaba sin punto"
+    assert memoria.interacciones()[0]["truncada"] == 0
+
+
+def test_migra_bases_sin_columna_truncada(tmp_path):
+    import sqlite3
+    ruta = tmp_path / "vieja.db"
+    db = sqlite3.connect(ruta)
+    db.execute("CREATE TABLE interacciones (id INTEGER PRIMARY KEY, fecha TEXT, conversacion TEXT, "
+               "canal TEXT, modelo TEXT, peticion TEXT, respuesta TEXT, modulo TEXT, herramientas TEXT, "
+               "rondas_llm INTEGER, t_llm_ms REAL, t_modulos_ms REAL, t_total_ms REAL, error TEXT)")
+    db.commit(); db.close()
+    m = Memoria(ruta)
+    cols = {f["name"] for f in m._db.execute("PRAGMA table_info(interacciones)")}
+    assert "truncada" in cols

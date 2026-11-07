@@ -6,6 +6,7 @@ con qué argumentos; leer y escribir es siempre cosa del módulo.
 
 from __future__ import annotations
 
+import re
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -25,7 +26,7 @@ DIAS = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "doming
 # Por eso la fecha y la hora no van aquí sino al inicio de cada mensaje del
 # usuario (ver sellar()). Medido en benchmarks/ — ver docs/arquitectura.md DA-07.
 PROMPT_SISTEMA = """Eres Mortimer, un asistente personal que se ejecuta en el servidor doméstico del usuario.
-Responde siempre en castellano, de forma breve y directa.
+Responde siempre en castellano, de forma breve y directa: tres frases como máximo, salvo que el usuario pida más detalle.
 Cada mensaje del usuario empieza con la fecha y la hora en que lo envió, entre corchetes. Úsalas para interpretar expresiones como "mañana", "el jueves" o "esta semana".
 
 Si una petición se puede resolver con una de las herramientas disponibles, úsala en vez de inventar la respuesta.
@@ -38,12 +39,29 @@ def sellar(texto: str, ahora: datetime) -> str:
     return f"[{DIAS[ahora.weekday()]} {ahora:%d/%m/%Y %H:%M}] {texto}"
 
 
+_FIN_FRASE = re.compile(r"[.!?…](?=\s|$)")
+
+
+def recortar(texto: str) -> str:
+    """Deja una respuesta cortada por num_predict en la última frase completa.
+
+    Si no hay ninguna frase completa razonable (menos del 40 % del texto), se
+    conserva el texto y se marca con '…' para que se vea que falta el final.
+    """
+    texto = texto.rstrip()
+    finales = [m.end() for m in _FIN_FRASE.finditer(texto)]
+    if finales and finales[-1] >= len(texto) * 0.4:
+        return texto[:finales[-1]]
+    return texto + "…"
+
+
 @dataclass
 class Respuesta:
     texto: str
     conversacion: str
     herramientas: list[dict[str, Any]] = field(default_factory=list)
     interaccion_id: int | None = None
+    truncada: bool = False
 
 
 class Orquestador:
@@ -65,6 +83,7 @@ class Orquestador:
         usadas: list[dict[str, Any]] = []
         error: str | None = None
         respuesta = ""
+        truncada = False
 
         sellado = sellar(texto, datetime.now(ZoneInfo(self.zona)))
         mensajes = [{"role": "system", "content": PROMPT_SISTEMA},
@@ -83,6 +102,9 @@ class Orquestador:
 
                 if not r.llamadas:
                     respuesta = r.contenido.strip()
+                    if r.truncada and respuesta:
+                        truncada = True
+                        respuesta = recortar(respuesta)
                     break
 
                 mensajes.append(r.mensaje_crudo or {"role": "assistant", "content": r.contenido})
@@ -112,5 +134,6 @@ class Orquestador:
             herramientas=usadas, rondas_llm=rondas,
             t_llm_ms=round(t_llm * 1000, 1), t_modulos_ms=round(t_mod * 1000, 1),
             t_total_ms=round((time.perf_counter() - t0) * 1000, 1), error=error,
+            truncada=int(truncada),
         )
-        return Respuesta(respuesta, conversacion, usadas, iid)
+        return Respuesta(respuesta, conversacion, usadas, iid, truncada)

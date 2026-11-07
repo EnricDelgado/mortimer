@@ -133,7 +133,27 @@ Desarrollo en el Mac (`scripts/dev.sh`, Ollama nativo); despliegue y medición e
 - Conversación abierta: *streaming* o límite de longitud. Ahora tarda hasta 51 s.
 - La evaluación final usará un banco de frases distinto del del spike, para no sobreajustar.
 
+## DA-09 · Conversación libre: tope de longitud ahora, *streaming* más adelante · 14/10/2026
+
+**Contexto.** En el spike v2, la pregunta general N02 ("¿Qué es el capitalismo de vigilancia?") tardó **51 s**. El modelo contestó con un texto largo a unos 7 tokens/s en la CPU del servidor. El RNF-03 (respuesta en menos de 10 s) se cumple en las peticiones a módulos, pero no en la conversación libre.
+
+**Alternativas.**
+- A. *Streaming*: mostrar la respuesta a medida que se genera. La primera palabra llega en pocos segundos, aunque el total no baja. Exige cambiar el cliente de Ollama (`stream: true` y lectura de llamadas a herramienta en el flujo) y el chat (SSE o fragmentos con htmx). Es un cambio grande para hacerlo ahora.
+- B. Tope de tokens de salida (`num_predict`) y prompt que pida brevedad. Es un cambio pequeño y medible, pero no garantiza 10 s: a 7 tokens/s, 10 s dan para unos 50 tokens después de procesar el prompt, demasiado poco para una respuesta útil.
+- C. No hacer nada y documentar que el RNF-03 solo aplica a las peticiones a módulos.
+
+**Decisión.** B ahora, como red de seguridad. A queda pendiente para cuando el Calendario funcione.
+- `NUM_PREDICT=160` por defecto, unos 23 s en el peor caso, frente a los 51 s medidos. Las llamadas a herramienta del esquema v2 ocupan muchos menos tokens, así que el tope no les afecta.
+- El prompt de sistema pide "tres frases como máximo, salvo que el usuario pida más detalle". Sigue siendo fijo, así que la caché de prefijo se mantiene.
+- Si Ollama corta la salida (`done_reason = "length"`), el core recorta la respuesta en la última frase completa. Si no hay ninguna razonable, añade "…". La interacción queda marcada con `truncada = 1`, una columna nueva en `interacciones` que se añade sola a las bases existentes.
+
+**Consecuencias.**
+- La conversación libre sigue por encima de 10 s en el peor caso. Para el capítulo 3 hay dos salidas: implementar el *streaming* y medir el tiempo hasta el primer token, o acotar el RNF-03 a las peticiones a módulos. **Pendiente de decidir.**
+- El cambio de prompt afecta también al benchmark, que importa `PROMPT_SISTEMA`. Antes de dar por buena la configuración hay que repetir el spike v2 con `--num-predict 160` y comprobar que no empeora: 90 % de herramienta, 71 % de argumentos, 95 % de decisiones por debajo de 10 s.
+- El porcentaje de respuestas truncadas pasa a ser una métrica más de la evaluación.
+
 ## Pendiente
 
 - Segunda ronda opcional: que una herramienta pueda devolver ya la respuesta final para el usuario y el core no tenga que llamar otra vez al modelo.
 - Acceso desde fuera de casa (VPN tipo WireGuard/Tailscale) y autenticación del chat web.
+- *Streaming* de la respuesta en el chat (DA-09) y decisión sobre cómo se mide el RNF-03 en la conversación libre.

@@ -36,7 +36,8 @@ def crear_app(config: Config | None = None, llm=None, destinos=None) -> FastAPI:
     async def ciclo(app: FastAPI):
         registro = Registro(destinos if destinos is not None else config.modulos)
         await registro.actualizar()
-        modelo = llm or OllamaLLM(config.ollama_url, config.modelo, config.think, config.num_ctx)
+        modelo = llm or OllamaLLM(config.ollama_url, config.modelo, config.think, config.num_ctx,
+                                  config.num_predict)
         app.state.registro = registro
         app.state.memoria = Memoria(config.data_dir / "mortimer.db")
         app.state.orq = Orquestador(

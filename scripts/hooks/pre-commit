@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# Barrera antes de cada commit: el repo es público.
+#  1. Bloquea ficheros sensibles aunque se hayan añadido con `git add -f`.
+#  2. Busca secretos en las líneas añadidas.
+# Activar (una vez por clon):  git config core.hooksPath scripts/hooks
+# Saltarlo en un falso positivo comprobado:  git commit --no-verify
+set -uo pipefail
+rojo=$'\033[31m'; fin=$'\033[0m'; fallo=0
+
+# 1. Nombres de fichero prohibidos
+nombres='(^|/)\.env($|\.)|(^|/)[^/]*\.env$|\.(pem|key|p12|pfx|jks|keystore|ppk|db|db-wal|db-shm|sqlite3?|session|ovpn|gguf|bak|dump)$|(^|/)id_(rsa|ed25519|ecdsa)|(^|/)(secrets?|\.secrets|data|vault|backups)/|credentials[^/]*\.json$|client_secret[^/]*\.json$|docker-compose\.override\.ya?ml$|(^|/)wg[^/]*\.conf$'
+while IFS= read -r f; do
+  [ -z "$f" ] && continue
+  case "$f" in *.env.example) continue;; esac
+  if echo "$f" | grep -Eq "$nombres"; then
+    echo "${rojo}✗ fichero sensible en el commit:${fin} $f"; fallo=1
+  fi
+done < <(git diff --cached --name-only --diff-filter=ACMR)
+
+# 2. Patrones de secretos en lo añadido (se excluyen librerías minificadas)
+patrones='[0-9]{8,10}:[A-Za-z0-9_-]{35}|eyJ[A-Za-z0-9_-]{15,}\.eyJ[A-Za-z0-9_-]{15,}|-----BEGIN [A-Z ]*PRIVATE KEY|gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}|AKIA[0-9A-Z]{16}|sk-[A-Za-z0-9_-]{20,}|xox[baprs]-[A-Za-z0-9-]{10,}|(password|passwd|secret|token|api[_-]?key)[A-Za-z_]*[[:space:]]*[:=][[:space:]]*["'"'"']?[A-Za-z0-9/+_.-]{12,}'
+hallazgos=$(git diff --cached -U0 --diff-filter=ACMR -- . ':!*.min.js' ':!*.min.css' \
+  | grep -E '^\+[^+]' | grep -E -i -n "$patrones" || true)
+if [ -n "$hallazgos" ]; then
+  echo "${rojo}✗ posible secreto en las líneas añadidas:${fin}"
+  echo "$hallazgos" | cut -c1-160
+  fallo=1
+fi
+
+if [ "$fallo" -ne 0 ]; then
+  echo
+  echo "Commit bloqueado. Quita el fichero (git restore --staged <f>) o el secreto."
+  echo "Si es un falso positivo comprobado: git commit --no-verify"
+  exit 1
+fi
+exit 0
