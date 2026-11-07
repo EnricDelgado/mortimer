@@ -24,6 +24,8 @@ CONTRATO = {
     "crear_evento": ({"titulo", "dia", "hora", "hora_fin", "ubicacion"}, {"titulo", "dia"}),
     "listar_eventos": ({"periodo"}, {"periodo"}),
     "cancelar_evento": ({"titulo", "dia", "id"}, set()),
+    # D4 (Enric, ENR-04): editar_evento también por chat.
+    "editar_evento": ({"titulo", "dia", "nuevo_dia", "nueva_hora", "nueva_hora_fin", "nuevo_titulo"}, {"titulo"}),
     "buscar_huecos": ({"dia", "duracion_min"}, {"dia", "duracion_min"}),
 }
 
@@ -38,7 +40,7 @@ def servidor(servicio):
     return crear_servidor(servicio)
 
 
-async def test_lista_las_cuatro_herramientas_del_contrato(servidor):
+async def test_lista_las_herramientas_del_contrato(servidor):
     async with Client(servidor) as c:
         assert c.server_info.name == "calendario"
         tools = {t.name: t for t in (await c.list_tools()).tools}
@@ -151,7 +153,7 @@ async def test_el_registro_del_core_descubre_el_modulo(servidor):
 
     assert registro.modulos[0].nombre == "calendario" and registro.modulos[0].estado == "ok"
     herramientas = registro.para_llm()
-    assert len(herramientas) == 4
+    assert len(herramientas) == 5
     assert {h["function"]["name"] for h in herramientas} == set(CONTRATO)
     crear = next(h for h in herramientas if h["function"]["name"] == "crear_evento")
     assert set(crear["function"]["parameters"]["required"]) == {"titulo", "dia"}
@@ -166,4 +168,4 @@ async def test_receta_de_carga_en_memoria(monkeypatch, tmp_path):
     main = cargar_modulo_calendario()
     registro = cargar_registro_del_core().Registro([main.mcp])
     await registro.actualizar()
-    assert len(registro.para_llm()) == 4
+    assert len(registro.para_llm()) == 5

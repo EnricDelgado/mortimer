@@ -311,7 +311,7 @@ class Calendario:
         ahora = self.ahora()
         d = fechas.resolver_dia_con_reloj(dia, ahora)
         if d is None:
-            return resultado(f"No entiendo la fecha '{dia}'. ¿Qué día es?", {"error": "fecha"})
+            return resultado(self._fecha_no_valida(dia) + " No he creado nada. ¿Qué día es?", {"error": "fecha"})
 
         aviso_fin = ""
         if (hora or "").strip():
@@ -347,6 +347,15 @@ class Calendario:
             texto += " Ojo: se solapa con " + _y(
                 [f"'{o['titulo']}' a las {_hora(self._inicio(o))}" for o in solapes]) + "."
         return resultado(texto, {"evento": evento, "solapamientos": solapes})
+
+    @staticmethod
+    def _fecha_no_valida(dia: str) -> str:
+        """'El 31 de noviembre no existe.' o 'No entiendo la fecha …' (QA staging CH-07)."""
+        imposible = fechas.fecha_imposible(dia)
+        if imposible:
+            n, mes, dias_mes = imposible
+            return f"El {n} de {mes} no existe: {mes} tiene {dias_mes} días."
+        return f"No entiendo la fecha '{dia}'."
 
     def listar(self, periodo: str) -> dict[str, Any]:
         ahora = self.ahora()
@@ -420,70 +429,168 @@ class Calendario:
             difflib.get_close_matches(c, palabras[e["id"]], n=1, cutoff=0.75) for c in claves)]
         return erratas, False
 
-    def cancelar(self, titulo: str = "", dia: str = "", id: str = "") -> dict[str, Any]:
-        titulo, dia, id = (titulo or "").strip(), (dia or "").strip(), (id or "").strip()
+    # Verbos de las frases de _localizar: (subjuntivo, 1.ª persona, clave en datos, infinitivo, participio).
+    _CANCELAR = ("cancele", "cancelo", "cancelado", "cancelar", "cancelado")
+    _MOVER = ("mueva", "muevo", "movido", "cambiar", "cambiado")
+
+    def _localizar(self, titulo: str, dia: str, id: str,
+                   verbos: tuple[str, str, str, str, str]) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+        """Encuentra el único evento activo al que se refiere el usuario.
+
+        Devuelve (evento, None) si hay uno y es seguro, o (None, resultado) con
+        la pregunta o el aviso para el usuario. Nunca toca la base (RF-05).
+        Lo comparten cancelar_evento y editar_evento.
+        """
+        subj, primera, clave, infinitivo, participio = verbos
+        vacio = {clave: None, "candidatos": []}
         if id:
             ev = self.db.obtener(id)
             if ev is None or ev["cancelado_en"]:
-                return resultado("No encuentro ningún evento activo con ese identificador. "
-                                 "¿Cómo se llama el evento que quieres cancelar?",
-                                 {"cancelado": None, "candidatos": []})
-            return self._cancelar_uno(ev)
+                return None, resultado("No encuentro ningún evento activo con ese identificador. "
+                                       f"¿Cómo se llama el evento que quieres {infinitivo}?", vacio)
+            return ev, None
         if not titulo and not dia:
-            return resultado("¿Qué evento quieres cancelar?", {"cancelado": None, "candidatos": []})
+            return None, resultado(f"¿Qué evento quieres {infinitivo}?", vacio)
 
         ahora = self.ahora()
         hoy = ahora.date()
-        d = None
-        if dia:
-            d = fechas.resolver_dia_con_reloj(dia, ahora)
-            if d is None:
-                return resultado(f"No entiendo la fecha '{dia}'. ¿Qué día es el evento que quieres cancelar?",
-                                 {"error": "fecha", "cancelado": None, "candidatos": []})
+        d = fechas.resolver_dia_con_reloj(dia, ahora) if dia else None
+        if d is None and not titulo:
+            return None, resultado(f"No entiendo la fecha '{dia}'. ¿Qué evento quieres {infinitivo}?",
+                                   {"error": "fecha", **vacio})
+        # Con título, un día que no se entiende no corta la búsqueda: se busca
+        # solo por el título y se propone lo que haya, pero sin tocar nada aunque
+        # haya un único candidato (QA staging CH-13/CH-14: el modelo rellenaba
+        # `dia` con "único" o "séptimo" y la respuesta era "No entiendo la fecha").
+        dia_ignorado = bool(dia) and d is None
+        if d is not None:
             pool = self._activos(d, d + timedelta(days=1))
         else:
-            pool = self._activos(hoy)  # solo lo que queda por delante: lo pasado no se cancela
+            pool = self._activos(hoy)  # solo lo que queda por delante: lo pasado no se toca
         candidatos, seguro = self._buscar(titulo, pool) if titulo else (pool, True)
 
         if not candidatos:
             if d is not None and titulo:
                 otros, _ = self._buscar(titulo, self._activos(hoy))
                 if otros:
-                    return resultado(
+                    return None, resultado(
                         f"No tienes '{titulo}' {self._cuando(d)}. Sí tengo "
                         + _y([self._describir(o) for o in otros[:MAX_CANDIDATOS]])
-                        + ". ¿Quieres que cancele " + ("ese" if len(otros) == 1 else "alguno de esos")
+                        + f". ¿Quieres que {subj} " + ("ese" if len(otros) == 1 else "alguno de esos")
                         + "?",
-                        {"cancelado": None, "candidatos": otros})
+                        {clave: None, "candidatos": otros})
             if titulo:
                 donde = f" {self._cuando(d)}" if d else ""
-                return resultado(f"No encuentro ningún evento '{titulo}'{donde}. No he cancelado nada.",
-                                 {"cancelado": None, "candidatos": []})
-            return resultado(f"No tienes nada {self._cuando(d)}, así que no he cancelado nada.",
-                             {"cancelado": None, "candidatos": []})
+                previo = f"No entiendo la fecha '{dia}' y no" if dia_ignorado else "No"
+                return None, resultado(f"{previo} encuentro ningún evento '{titulo}'{donde}. "
+                                       f"No he {participio} nada.", vacio)
+            return None, resultado(f"No tienes nada {self._cuando(d)}, así que no he {participio} nada.",
+                                   vacio)
 
         if not seguro:
-            # Solo encaja al revés o con erratas: se propone, no se cancela (QA A-01).
+            # Solo encaja al revés o con erratas: se propone, no se toca (QA A-01).
             mostrados = [self._describir(e) for e in candidatos[:MAX_CANDIDATOS]]
             if len(candidatos) == 1:
                 texto = (f"No tengo '{titulo}'. Lo más parecido es {mostrados[0]}. "
-                         "¿Es ese el que quieres cancelar?")
+                         f"¿Es ese el que quieres {infinitivo}?")
             else:
-                texto = f"No tengo '{titulo}' tal cual. Se parecen {_y(mostrados)}. ¿Cuál cancelo?"
-            return resultado(texto, {"cancelado": None, "candidatos": candidatos})
+                texto = f"No tengo '{titulo}' tal cual. Se parecen {_y(mostrados)}. ¿Cuál {primera}?"
+            return None, resultado(texto, {clave: None, "candidatos": candidatos})
 
+        if len(candidatos) == 1 and not dia_ignorado:
+            return candidatos[0], None
         if len(candidatos) == 1:
-            return self._cancelar_uno(candidatos[0])
+            return None, resultado(f"No entiendo la fecha '{dia}', pero tengo {self._describir(candidatos[0])}. "
+                                   f"¿Es ese el que quieres {infinitivo}?",
+                                   {"error": "fecha", clave: None, "candidatos": candidatos})
 
         # Ambigüedad: no se toca la base (RF-05). Se pregunta con día y hora.
         n = len(candidatos)
         mostrados = [self._describir(e) for e in candidatos[:MAX_CANDIDATOS]]
         if n <= MAX_CANDIDATOS:
-            texto = f"Tengo {NUMEROS.get(n, n)}: {_y(mostrados)}. ¿Cuál cancelo?"
+            texto = f"Tengo {NUMEROS.get(n, n)}: {_y(mostrados)}. ¿Cuál {primera}?"
         else:
             texto = (f"Tengo {n} que encajan; los primeros son {_y(mostrados)}. "
-                     "¿Cuál cancelo? Si me dices el día, lo encuentro antes.")
-        return resultado(texto, {"cancelado": None, "candidatos": candidatos})
+                     f"¿Cuál {primera}? Si me dices el día, lo encuentro antes.")
+        return None, resultado(texto, {clave: None, "candidatos": candidatos})
+
+    def cancelar(self, titulo: str = "", dia: str = "", id: str = "") -> dict[str, Any]:
+        titulo, dia, id = (titulo or "").strip(), (dia or "").strip(), (id or "").strip()
+        ev, respuesta = self._localizar(titulo, dia, id, self._CANCELAR)
+        if respuesta is not None:
+            return respuesta
+        return self._cancelar_uno(ev)
+
+    def editar_por_chat(self, titulo: str = "", dia: str = "", nuevo_dia: str = "",
+                        nueva_hora: str = "", nueva_hora_fin: str = "", nuevo_titulo: str = "",
+                        id: str = "") -> dict[str, Any]:
+        """Mueve o renombra un evento (decisión D4 de Enric: editar_evento también por chat).
+
+        Mover conserva la duración; sin nueva hora, conserva la hora; sin nuevo
+        día, conserva el día. Si el evento no se identifica con seguridad, pregunta.
+        """
+        titulo, dia, id = (titulo or "").strip(), (dia or "").strip(), (id or "").strip()
+        nuevo_dia, nueva_hora = (nuevo_dia or "").strip(), (nueva_hora or "").strip()
+        nueva_hora_fin, nuevo_titulo = (nueva_hora_fin or "").strip(), (nuevo_titulo or "").strip()
+        if not (nuevo_dia or nueva_hora or nueva_hora_fin or nuevo_titulo):
+            return resultado("¿Qué quieres cambiar del evento: el día, la hora o el nombre?",
+                             {"error": "cambios", "movido": None, "candidatos": []})
+        ev, respuesta = self._localizar(titulo, dia, id, self._MOVER)
+        if respuesta is not None:
+            return respuesta
+
+        ahora = self.ahora()
+        ini_actual, fin_actual = self._inicio(ev), self._fin(ev)
+        d = ini_actual.date()
+        if nuevo_dia:
+            d = fechas.resolver_dia_con_reloj(nuevo_dia, ahora)
+            if d is None:
+                return resultado(self._fecha_no_valida(nuevo_dia) + " No he cambiado nada. ¿A qué día lo paso?",
+                                 {"error": "fecha", "movido": None, "candidatos": [ev]})
+        campos: dict[str, Any] = {}
+        if nuevo_titulo:
+            campos["titulo"] = nuevo_titulo
+        if nueva_hora:
+            h = fechas.resolver_hora(nueva_hora)
+            if h is None:
+                return resultado(f"No entiendo la hora '{nueva_hora}'. No he cambiado nada. ¿A qué hora lo pongo?",
+                                 {"error": "hora", "movido": None, "candidatos": [ev]})
+            campos["todo_el_dia"] = False
+            campos["inicio"] = self._iso(self._local(d, h))
+        elif nuevo_dia:
+            if ev["todo_el_dia"]:
+                campos["inicio"] = d.isoformat()
+            else:
+                campos["inicio"] = self._iso(self._local(d, ini_actual.timetz().replace(tzinfo=None)))
+        if nueva_hora_fin:
+            hf = fechas.resolver_hora(nueva_hora_fin)
+            if hf is None:
+                return resultado(f"No entiendo la hora de fin '{nueva_hora_fin}'. No he cambiado nada.",
+                                 {"error": "hora", "movido": None, "candidatos": [ev]})
+            base = self._parsear(campos.get("inicio", ev["inicio"]))
+            if not isinstance(base, datetime) or campos.get("todo_el_dia", ev["todo_el_dia"]):
+                return resultado("Es un evento de día completo: dime también la hora de inicio.",
+                                 {"error": "hora", "movido": None, "candidatos": [ev]})
+            fin = self._local(base.date(), hf)
+            if fin <= base:
+                fin += timedelta(days=1)
+            campos["fin"] = self._iso(fin)
+        elif "inicio" in campos and not campos.get("todo_el_dia", ev["todo_el_dia"]) and not ev["todo_el_dia"]:
+            campos["fin"] = self._iso(self._parsear(campos["inicio"]) + (fin_actual - ini_actual))
+        try:
+            r = self.editar(ev["id"], **campos)
+        except ErrorValidacion as e:
+            return resultado(f"No he podido cambiarlo: {e}.", {"error": "validacion", "movido": None,
+                                                             "candidatos": [ev]})
+        nuevo = r["evento"]
+        texto = f"Hecho: ahora es {self._describir(nuevo)}"
+        if nuevo["todo_el_dia"]:
+            texto += ", todo el día"
+        texto += "."
+        if r["solapamientos"]:
+            texto += " Ojo: se solapa con " + _y(
+                [f"'{o['titulo']}' a las {_hora(self._inicio(o))}" for o in r["solapamientos"]]) + "."
+        return resultado(texto, {"movido": nuevo, "antes": ev, "solapamientos": r["solapamientos"]})
 
     def _cancelar_uno(self, ev: dict[str, Any]) -> dict[str, Any]:
         ev = self.db.cancelar(ev["id"], self._iso(self.ahora()))

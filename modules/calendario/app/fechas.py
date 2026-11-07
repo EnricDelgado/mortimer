@@ -110,6 +110,29 @@ def resolver_dia(expr: str | None, hoy: date) -> date | None:
     return None
 
 
+_DIAS_MES = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+_NOMBRES_MES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto",
+                "septiembre", "octubre", "noviembre", "diciembre"]
+
+
+def fecha_imposible(expr: str | None) -> tuple[int, str, int] | None:
+    """Si la expresión es un 'N de mes' que no existe ('31 de noviembre'),
+    devuelve (N, mes, días que tiene ese mes). Si no, None (QA staging CH-07).
+
+    Febrero se da con 29 días: el 29 de febrero solo es imposible en años no
+    bisiestos, y eso ya lo resuelve resolver_dia.
+    """
+    if not expr:
+        return None
+    t = _corregir(normalizar(expr))
+    m = re.search(r"(\d{1,2}) de (" + "|".join(MESES) + r")\b", t)
+    if not m:
+        return None
+    n, mes = int(m[1]), MESES[m[2]]
+    maximo = _DIAS_MES[mes - 1]
+    return (n, _NOMBRES_MES[mes - 1], maximo) if n > maximo or n == 0 else None
+
+
 def resolver_dia_con_reloj(expr: str | None, ahora: datetime) -> date | None:
     """Como resolver_dia, pero a partir del instante actual con zona horaria.
 

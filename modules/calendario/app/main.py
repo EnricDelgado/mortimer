@@ -108,6 +108,41 @@ def _texto(valor: Any) -> str:
     return str(valor)
 
 
+# Metadatos para el core (contrato de módulo, DA-15). El core los usa antes de
+# llamar a la herramienta y no cambian lo que ve el modelo:
+#   fechas:   argumentos que son una expresión de día o de periodo. Si el
+#             mensaje del usuario contiene una sola expresión temporal, el core
+#             la usa en lugar de la que haya escrito el modelo ("pasado mañana"
+#             que llega como "manana", "smana" como "mes"); si no contiene
+#             ninguna y el argumento es opcional, lo deja vacío (el modelo se
+#             inventaba "sábado" o "único" al cancelar).
+#   requiere: la herramienta solo se ejecuta si el mensaje (o el anterior del
+#             usuario, para las respuestas del tipo "la del tinte") encaja con
+#             alguna de estas expresiones regulares, sobre texto en minúsculas y
+#             sin tildes.
+#   excluye:  no se ejecuta si el mensaje encaja con alguna.
+# Si el core rechaza una llamada, se lo dice al modelo y le quita la herramienta
+# en la ronda siguiente.
+_ACCIONES_FUERA = (r"\b(manda\w*|envia\w*|whatsapp|sms|telegram|correo|e-?mail|"
+                   r"recomienda\w*|recomiendame)\b")
+_MOVER = (r"\b(pasa|pasalo|pasala|mueve\w*|cambia\w*|retrasa\w*|adelanta\w*|aplaza\w*|"
+          r"traslada\w*|renombra\w*|modifica\w*|edita\w*|corrige\w*)\b")
+META: dict[str, dict[str, Any]] = {
+    "crear_evento": {"mortimer": {"fechas": {"dia": "dia"},
+                                  "excluye": [_ACCIONES_FUERA, _MOVER + r".*\b(a|al|para)\b"]}},
+    "listar_eventos": {"mortimer": {"fechas": {"periodo": "periodo"}}},
+    "cancelar_evento": {"mortimer": {
+        "fechas": {"dia": "dia"},
+        "requiere": [r"\b(cancel\w*|anul\w*|borr\w*|elimin\w*|quit\w*|suprim\w*|desapunt\w*|"
+                     r"ya no (voy|tengo|hay|puedo))\b"]}},
+    "editar_evento": {"mortimer": {"requiere": [_MOVER]}},
+    "buscar_huecos": {"mortimer": {
+        "fechas": {"dia": "dia"},
+        "requiere": [r"\b(libres?|huecos?|cabe|caben|cabria|rato|ratos|disponibles?|tiempo|"
+                     r"cuando puedo|tengo .*horas? seguidas)\b"]}},
+}
+
+
 def crear_servidor(servicio: Calendario) -> MCPServer:
     mcp = MCPServer(
         NOMBRE,
@@ -115,7 +150,7 @@ def crear_servidor(servicio: Calendario) -> MCPServer:
         instructions="Calendario personal: crea, consulta y cancela eventos y busca huecos libres.",
     )
 
-    @mcp.tool()
+    @mcp.tool(meta=META["crear_evento"])
     def crear_evento(
         titulo: Annotated[str, Field(description="Título breve del evento, p. ej. 'Dentista'.")],
         dia: Annotated[str, Field(description=DIA)],
@@ -123,34 +158,49 @@ def crear_servidor(servicio: Calendario) -> MCPServer:
         hora_fin: Annotated[Texto, Field(description="Hora de fin HH:MM, solo si el usuario la dice.")] = "",
         ubicacion: Annotated[str, Field(description="Lugar, solo si el usuario lo dice.")] = "",
     ) -> Annotated[CallToolResult, Resultado]:
-        """Crea un evento en el calendario. Úsala también cuando el usuario cuenta que tiene algo ('tengo dentista el martes', 'me ha surgido una reunión')."""
+        """Crea un evento en el calendario. Úsala también cuando el usuario cuenta que tiene algo o que ha quedado ('tengo dentista el martes', 'quedo con Pau el sábado'). No la uses para mover un evento que ya existe (eso es editar_evento) ni para cosas que no son del calendario, como mandar mensajes o recomendar algo."""
         return _a_mcp(servicio.crear(titulo, dia, _texto(hora), _texto(hora_fin), ubicacion))
 
-    @mcp.tool()
+    @mcp.tool(meta=META["listar_eventos"])
     def listar_eventos(
         periodo: Annotated[str, Field(description=(
-            "Periodo tal como lo dice el usuario: 'hoy', 'manana', 'esta semana', "
+            "Periodo tal como lo dice el usuario: 'hoy', 'manana', 'pasado manana', 'esta semana', "
             "'la semana que viene', 'fin de semana', 'este mes', 'el mes que viene' "
             "o un día ('viernes', '3 de noviembre')."))],
     ) -> Annotated[CallToolResult, Resultado]:
         """Consulta la agenda del usuario en un periodo: qué tiene hoy, mañana, esta semana, etc."""
         return _a_mcp(servicio.listar(periodo))
 
-    @mcp.tool()
+    @mcp.tool(meta=META["cancelar_evento"])
     def cancelar_evento(
         titulo: Annotated[str, Field(description="Palabra clave del título del evento, p. ej. 'dentista'.")] = "",
-        dia: Annotated[str, Field(description=DIA + " Vacío si el usuario no lo dice.")] = "",
+        dia: Annotated[str, Field(description=DIA + " Déjalo vacío si el usuario no dice el día: no lo deduzcas.")] = "",
         id: Annotated[str, Field(description="Identificador del evento, solo si aparece en una respuesta anterior.")] = "",
     ) -> Annotated[CallToolResult, Resultado]:
         """Cancela un evento del calendario identificado por su título y, si se dice, su día. Si varios encajan, no cancela nada y pregunta cuál."""
         return _a_mcp(servicio.cancelar(titulo, dia, id))
 
-    @mcp.tool()
+    @mcp.tool(meta=META["editar_evento"])
+    def editar_evento(
+        titulo: Annotated[str, Field(description="Palabra clave del título del evento que ya existe, p. ej. 'yoga'.")],
+        dia: Annotated[str, Field(description="Día en que está ahora el evento, solo si el usuario lo dice. "
+                                              "Vacío si no lo dice.")] = "",
+        nuevo_dia: Annotated[str, Field(description="Día al que se mueve, tal como lo dice el usuario "
+                                                    "('jueves', '20 de noviembre'). Vacío si no cambia.")] = "",
+        nueva_hora: Annotated[Texto, Field(description="Nueva hora de inicio HH:MM. Vacía si no cambia.")] = "",
+        nueva_hora_fin: Annotated[Texto, Field(description="Nueva hora de fin HH:MM, solo si el usuario la dice.")] = "",
+        nuevo_titulo: Annotated[str, Field(description="Nuevo nombre, solo si el usuario lo quiere cambiar.")] = "",
+    ) -> Annotated[CallToolResult, Resultado]:
+        """Mueve o cambia un evento que ya existe: otro día, otra hora u otro nombre ('pasa el yoga al jueves', 'retrasa el dentista a las 17:00'). Si varios encajan, no cambia nada y pregunta cuál."""
+        return _a_mcp(servicio.editar_por_chat(titulo, dia, nuevo_dia, _texto(nueva_hora),
+                                               _texto(nueva_hora_fin), nuevo_titulo))
+
+    @mcp.tool(meta=META["buscar_huecos"])
     def buscar_huecos(
         dia: Annotated[str, Field(description=DIA)],
         duracion_min: Annotated[Entero, Field(description="Duración en minutos (una hora = 60).")],
     ) -> Annotated[CallToolResult, Resultado]:
-        """Busca tiempo libre en un día para una duración dada. Solo cuando el usuario pregunta explícitamente si tiene tiempo libre o un hueco."""
+        """Busca tiempo libre en un día para una duración dada. Solo cuando el usuario pregunta explícitamente si tiene tiempo libre o un hueco. Para apuntar un plan ('quedo con Pau el sábado') usa crear_evento."""
         return _a_mcp(servicio.huecos(dia, duracion_min))
 
     _registrar_rutas(mcp, servicio)

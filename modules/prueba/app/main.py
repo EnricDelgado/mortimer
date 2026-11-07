@@ -17,6 +17,7 @@ from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse
 
 NOMBRE = "prueba"
+ZONA = os.environ.get("ZONA_HORARIA", "Europe/Madrid")
 VERSION = "0.1.0"
 
 mcp = MCPServer(
@@ -26,12 +27,19 @@ mcp = MCPServer(
 )
 
 
-@mcp.tool()
-def dime_la_hora(zona: str = "Europe/Madrid") -> str:
-    """Devuelve la fecha y la hora actuales en una zona horaria IANA.
+# Metadatos para el core (DA-15): solo se ejecuta si el usuario pregunta la
+# hora o la fecha (QA staging CH-33: el modelo la llamaba ante un "Hola").
+META = {"mortimer": {"requiere": [r"\b(hora|horas|fecha|que dia|dia es|a cuantos estamos|a que dia)\b"]}}
 
-    Úsala cuando el usuario pregunte qué hora es o qué día es hoy.
+
+@mcp.tool(meta=META)
+def dime_la_hora(zona: str = "") -> str:
+    """Devuelve la fecha y la hora actuales.
+
+    Úsala solo cuando el usuario pregunte qué hora es o qué día es hoy; nunca
+    para saludar. La zona solo se rellena si el usuario nombra otro lugar.
     """
+    zona = (zona or "").strip() or ZONA
     try:
         tz = ZoneInfo(zona)
     except (ZoneInfoNotFoundError, ValueError):
