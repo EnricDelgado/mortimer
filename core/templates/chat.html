@@ -18,6 +18,7 @@
     .meta { color: var(--tenue); font-size: 13px; }
     .modulos span { border:1px solid var(--borde); border-radius:999px; padding:1px 8px; margin-left:4px; }
     .modulos .error { color:#b5483b; }
+    .modulos a { color:inherit; }
     #turnos { margin-top: 24px; display:flex; flex-direction:column; gap:14px; }
     .u { align-self:flex-end; background:var(--acento); color:var(--fondo); padding:8px 12px; border-radius:12px; max-width:85%; }
     .a { align-self:flex-start; background:var(--burbuja); border:1px solid var(--borde); padding:8px 12px; border-radius:12px; max-width:85%; white-space:pre-wrap; }
@@ -34,7 +35,7 @@
   <header>
     <h1>Mortimer</h1>
     <div class="meta modulos">modelo <b>{{ modelo }}</b> · módulos:
-      {% for m in modulos %}<span class="{{ m.estado }}" title="{{ m.descripcion or m.error }}">{{ m.nombre if m.estado == 'ok' else 'caído' }}</span>{% else %}<span>ninguno</span>{% endfor %}
+      {% for m in modulos %}{% if m.estado == 'ok' and m.url %}<a href="m/{{ m.nombre|urlencode }}/ui"><span class="{{ m.estado }}" title="{{ m.descripcion }}">{{ m.nombre }}</span></a>{% else %}<span class="{{ m.estado }}" title="{{ m.descripcion or m.error }}">{{ m.nombre if m.estado == 'ok' else 'caído' }}</span>{% endif %}{% else %}<span>ninguno</span>{% endfor %}
     </div>
   </header>
   <div id="turnos"></div>

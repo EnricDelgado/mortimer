@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from dataclasses import asdict
@@ -17,6 +18,7 @@ from .config import Config
 from .llm import OllamaLLM
 from .memoria import Memoria
 from .orquestador import Orquestador
+from .proxy import METODOS, Proxy
 from .registro import Registro
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
@@ -36,15 +38,24 @@ def crear_app(config: Config | None = None, llm=None, destinos=None) -> FastAPI:
     async def ciclo(app: FastAPI):
         registro = Registro(destinos if destinos is not None else config.modulos)
         await registro.actualizar()
+        # Los módulos pueden tardar unos segundos más que el core en arrancar
+        # (QA C-01): se reintenta unas veces antes de dejarlos en error.
+        for _ in range(config.reintentos_arranque):
+            if not any(m.estado == "error" for m in registro.modulos):
+                break
+            await asyncio.sleep(2)
+            await registro.actualizar()
+        app.state.proxy = Proxy(registro)
         modelo = llm or OllamaLLM(config.ollama_url, config.modelo, config.think, config.num_ctx,
                                   config.num_predict)
         app.state.registro = registro
         app.state.memoria = Memoria(config.data_dir / "mortimer.db")
         app.state.orq = Orquestador(
             modelo, registro, app.state.memoria, config.zona_horaria,
-            config.max_rondas_herramientas, config.historial_mensajes,
+            config.max_rondas_herramientas, config.historial_mensajes, config.ahora_fijo,
         )
         yield
+        await app.state.proxy.cerrar()
         if hasattr(modelo, "cerrar"):
             await modelo.cerrar()
 
@@ -54,8 +65,10 @@ def crear_app(config: Config | None = None, llm=None, destinos=None) -> FastAPI:
 
     @app.get("/health")
     async def health():
+        fijo = app.state.orq.ahora_fijo
         return {"estado": "ok", "modelo": config.modelo,
-                "herramientas": list(app.state.registro.herramientas)}
+                "herramientas": list(app.state.registro.herramientas),
+                "ahora_fijo": fijo.isoformat() if fijo else None}
 
     @app.post("/api/chat")
     async def api_chat(p: Peticion):
@@ -64,6 +77,7 @@ def crear_app(config: Config | None = None, llm=None, destinos=None) -> FastAPI:
 
     @app.get("/api/modulos")
     async def api_modulos():
+        await app.state.registro.reintentar_caidos()
         return [asdict(m) for m in app.state.registro.modulos]
 
     @app.post("/api/modulos/recargar")
@@ -72,8 +86,12 @@ def crear_app(config: Config | None = None, llm=None, destinos=None) -> FastAPI:
         return [asdict(m) for m in app.state.registro.modulos]
 
     @app.get("/api/interacciones")
-    async def interacciones(limite: int = 50):
-        return app.state.memoria.interacciones(limite)
+    async def interacciones(limite: int = 50, desde_id: int | None = None):
+        return app.state.memoria.interacciones(limite, desde_id)
+
+    @app.api_route("/m/{modulo}/{ruta:path}", methods=METODOS)
+    async def proxy_modulo(request: Request, modulo: str, ruta: str):
+        return await app.state.proxy.reenviar(request, modulo, ruta)
 
     @app.get("/", response_class=HTMLResponse)
     async def chat(request: Request):
