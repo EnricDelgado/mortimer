@@ -8,7 +8,8 @@ conversando con los que respondan (RF-01).
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+import time
+from dataclasses import dataclass, field
 from typing import Any
 
 from mcp import Client
@@ -26,6 +27,12 @@ class Herramienta:
     descripcion: str
     esquema: dict[str, Any]
     destino: Destino
+    # Metadatos `meta.mortimer` que declara el módulo (DA-15): fechas, requiere, excluye.
+    meta: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def requeridos(self) -> list[str]:
+        return list((self.esquema or {}).get("required") or [])
 
     def para_llm(self) -> dict[str, Any]:
         """Formato de herramienta que espera Ollama (estilo OpenAI)."""
@@ -70,6 +77,7 @@ class Registro:
         self.destinos = destinos
         self.herramientas: dict[str, Herramienta] = {}
         self.modulos: list[InfoModulo] = []
+        self._ultimo_intento = 0.0
 
     async def actualizar(self) -> None:
         herramientas: dict[str, Herramienta] = {}
@@ -97,6 +105,7 @@ class Registro:
                             descripcion=t.description or "",
                             esquema=t.input_schema or {},
                             destino=destino,
+                            meta=dict(((t.meta or {}).get("mortimer")) or {}),
                         )
                         nombres.append(t.name)
                     modulos.append(InfoModulo(
@@ -115,6 +124,19 @@ class Registro:
                 ))
         self.herramientas = herramientas
         self.modulos = modulos
+        self._ultimo_intento = time.monotonic()
+
+    async def reintentar_caidos(self, cada: float = 15.0) -> None:
+        """Vuelve a registrar si algún módulo estaba caído, como mucho una vez
+        cada `cada` segundos (QA C-01: si el Calendario arranca después que el
+        core, quedaba en error hasta un POST /api/modulos/recargar)."""
+        if not any(m.estado == "error" for m in self.modulos):
+            return
+        ahora = time.monotonic()
+        if ahora - self._ultimo_intento < cada:
+            return
+        self._ultimo_intento = ahora
+        await self.actualizar()
 
     def para_llm(self) -> list[dict[str, Any]]:
         return [h.para_llm() for h in self.herramientas.values()]

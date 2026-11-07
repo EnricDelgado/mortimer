@@ -152,8 +152,28 @@ Desarrollo en el Mac (`scripts/dev.sh`, Ollama nativo); despliegue y medición e
 - El cambio de prompt afecta también al benchmark, que importa `PROMPT_SISTEMA`. Antes de dar por buena la configuración hay que repetir el spike v2 con `--num-predict 160` y comprobar que no empeora: 90 % de herramienta, 71 % de argumentos, 95 % de decisiones por debajo de 10 s.
 - El porcentaje de respuestas truncadas pasa a ser una métrica más de la evaluación.
 
+## DA-15 · El core comprueba las llamadas con el texto del usuario · 07/11/2026
+
+**Contexto.** En el staging del Incremento 1 (QA del 5–7/11, `pruebas-INC1-staging.md`), granite4.1:3b eligió bien la herramienta casi siempre, pero: copió mal la expresión de fecha ("pasado mañana" → `manana`, "la smana que viene" → `el mes que viene`, "miércoles" → `miñero`); se inventó el día al cancelar (`dia="único"`, `dia="sábado"`), y llamó a herramientas que no tocaban (`crear_evento` para "mándale un WhatsApp", `dime_la_hora` para "hola", `buscar_huecos` para "quedo con Pau el sábado"). Además, en la segunda ronda reescribía la respuesta del módulo y llegó a decir que había creado eventos que el módulo había rechazado.
+
+**Alternativas.**
+- A. Más instrucciones en el prompt y en las descripciones. Ayuda, pero un modelo de 3B no las sigue de forma fiable y cada token de más se paga en CPU.
+- B. Otro modelo. Descartado por la RAM (D5).
+- C. Comprobaciones deterministas en el core, declaradas por cada módulo, en la línea de DA-08 (el modelo extrae, el código calcula).
+
+**Decisión.** C, junto con un ajuste ligero de A.
+- Cada herramienta publica en `meta.mortimer` qué argumentos son fechas (`fechas`) y con qué frases tiene sentido (`requiere`, `excluye`: expresiones regulares sobre el mensaje sin tildes). El core no sabe nada del calendario.
+- Antes de invocar, `core/app/argumentos.py` busca las expresiones temporales del mensaje original (con tolerancia a erratas). Si hay una sola, sustituye la del modelo; si no hay ninguna y el argumento es opcional, lo deja vacío. Con varias, respeta al modelo. Los argumentos originales quedan en `argumentos_modelo` para la evaluación.
+- Si una llamada no encaja (`requiere`/`excluye`), no se ejecuta: el core se lo dice al modelo y le quita esa herramienta en la ronda siguiente. `requiere` mira también el mensaje anterior del usuario, para respuestas como "la del tinte".
+- Respuesta final del módulo (DEV-07, DA-11): si todas las herramientas de una ronda devuelven `final: true`, el core responde con su texto sin otra ronda. Esto quita la reescritura falsa y baja el tiempo a una sola llamada al LLM.
+
+**Consecuencias.**
+- Es código testeable (`core/tests/test_respuesta_final.py`, `modules/calendario/tests/test_qa_staging.py`).
+- Las expresiones regulares son una lista cerrada: una frase que no encaje con `requiere` se queda sin herramienta. En la evaluación hay que contar estos falsos rechazos (llamada rechazada en un caso que la esperaba).
+- El prompt de sistema cambia (tres líneas): hay que repetir la regresión del benchmark (R4).
+
 ## Pendiente
 
-- Segunda ronda opcional: que una herramienta pueda devolver ya la respuesta final para el usuario y el core no tenga que llamar otra vez al modelo.
+- ~~Segunda ronda opcional~~: hecho en DEV-07 (DA-15).
 - Acceso desde fuera de casa (VPN tipo WireGuard/Tailscale) y autenticación del chat web.
 - *Streaming* de la respuesta en el chat (DA-09) y decisión sobre cómo se mide el RNF-03 en la conversación libre.

@@ -38,7 +38,9 @@ CREATE TABLE IF NOT EXISTS interacciones (
     t_modulos_ms   REAL NOT NULL,
     t_total_ms     REAL NOT NULL,
     error          TEXT,
-    truncada       INTEGER NOT NULL DEFAULT 0   -- 1 si la respuesta se cortó por num_predict (DA-09)
+    truncada       INTEGER NOT NULL DEFAULT 0,  -- 1 si la respuesta se cortó por num_predict (DA-09)
+    t_decision_ms  REAL,                        -- duración de la primera llamada al LLM (DEV-10)
+    respuesta_modulo INTEGER NOT NULL DEFAULT 0 -- 1 si la respuesta la redactó el módulo (DA-11)
 );
 """
 
@@ -55,9 +57,13 @@ class Memoria:
     def _migrar(self) -> None:
         # Bases creadas antes de DA-09 (Incremento 0) no tienen la columna.
         columnas = {f["name"] for f in self._db.execute("PRAGMA table_info(interacciones)")}
-        if "truncada" not in columnas:
-            self._db.execute("ALTER TABLE interacciones ADD COLUMN truncada INTEGER NOT NULL DEFAULT 0")
-            self._db.commit()
+        nuevas = {"truncada": "INTEGER NOT NULL DEFAULT 0",          # DA-09
+                  "t_decision_ms": "REAL",                           # DEV-10
+                  "respuesta_modulo": "INTEGER NOT NULL DEFAULT 0"}  # DEV-07 / DA-11
+        for nombre, tipo in nuevas.items():
+            if nombre not in columnas:
+                self._db.execute(f"ALTER TABLE interacciones ADD COLUMN {nombre} {tipo}")
+        self._db.commit()
 
     @staticmethod
     def _ahora() -> str:
@@ -88,9 +94,12 @@ class Memoria:
         self._db.commit()
         return int(cur.lastrowid)
 
-    def interacciones(self, limite: int = 50) -> list[dict[str, Any]]:
+    def interacciones(self, limite: int = 50, desde_id: int | None = None) -> list[dict[str, Any]]:
+        """Las últimas `limite` interacciones, de la más nueva a la más antigua.
+        Con `desde_id`, solo las posteriores a ese id (lo usa ejecutar.py)."""
         filas = self._db.execute(
-            "SELECT * FROM interacciones ORDER BY id DESC LIMIT ?", (limite,)
+            "SELECT * FROM interacciones WHERE id > ? ORDER BY id DESC LIMIT ?",
+            (desde_id or 0, limite),
         ).fetchall()
         res = []
         for f in filas:

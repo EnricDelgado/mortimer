@@ -28,3 +28,8 @@ class Config:
     data_dir: Path = Path(os.environ.get("DATA_DIR", "./data/core"))
     max_rondas_herramientas: int = int(os.environ.get("MAX_RONDAS", "4"))
     historial_mensajes: int = int(os.environ.get("HISTORIAL", "10"))
+    # Reloj fijo para la evaluación (DEV-10, DA-12): instante ISO, p. ej.
+    # 2026-10-29T18:00. Vacío = hora real. Nunca en producción.
+    ahora_fijo: str = os.environ.get("MORTIMER_AHORA", "").strip()
+    # Reintentos (cada 2 s) al arrancar si algún módulo no responde todavía (QA C-01).
+    reintentos_arranque: int = int(os.environ.get("REINTENTOS_ARRANQUE", "5"))
