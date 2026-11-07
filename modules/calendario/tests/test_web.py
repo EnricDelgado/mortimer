@@ -462,8 +462,6 @@ def test_compose_de_produccion():
     assert "CALENDARIO_PERMITIR_RESET" not in _entorno(cal)
 
 
-@pytest.mark.xfail(reason="El Dockerfile (Lote A) aún no copia templates/: falta 'COPY templates ./templates'",
-                   strict=False)
 def test_dockerfile_copia_las_plantillas():
     texto = (MODULO / "Dockerfile").read_text(encoding="utf-8")
     assert re.search(r"^COPY\s+templates\s+\./templates\s*$", texto, re.M)

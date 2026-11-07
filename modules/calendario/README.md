@@ -20,7 +20,12 @@ El modelo extrae expresiones tal como las dice el usuario ("el viernes", "17:00"
 | `crear_evento` | `titulo`, `dia`, `hora=""`, `hora_fin=""`, `ubicacion=""` | Crea un evento. Sin hora, ocupa el día completo; sin hora de fin, dura una hora. Si se solapa con otro, lo crea y avisa |
 | `listar_eventos` | `periodo` | Agenda de hoy, mañana, esta semana, la que viene, el fin de semana, el mes o un día concreto |
 | `cancelar_evento` | `titulo=""`, `dia=""`, `id=""` | Busca por título (sin distinguir tildes ni mayúsculas). La coincidencia exacta gana. Si encaja uno, lo cancela (borrado lógico, se puede restaurar). Si encajan varios, **no cancela nada** y pregunta cuál (RF-05). Si el evento solo se parece (erratas, o lo dicho es más largo que el título: «cena de empresa» frente a «Cena»), **no cancela**: lo propone y pregunta |
+| `editar_evento` | `titulo`, `dia=""`, `nuevo_dia=""`, `nueva_hora=""`, `nueva_hora_fin=""`, `nuevo_titulo=""` | Mueve o renombra un evento (decisión D4). Lo localiza igual que `cancelar_evento`; si no es seguro, pregunta. Mover conserva la hora y la duración, y avisa de solapamientos |
 | `buscar_huecos` | `dia`, `duracion_min` | Franjas libres de ese día entre `HUECOS_DESDE` y `HUECOS_HASTA` |
+
+Si `dia` llega con algo que no es una fecha («único», «séptimo»), `cancelar_evento` y `editar_evento` buscan solo por el título y **preguntan** antes de tocar nada. Una fecha imposible («31 de noviembre») se explica y no crea nada.
+
+Cada herramienta publica en `meta.mortimer` qué argumentos son fechas y con qué frases tiene sentido llamarla (`requiere`/`excluye`). El core usa esos metadatos para tomar la fecha del mensaje original del usuario y para rechazar llamadas que no encajan (DA-15, `core/app/argumentos.py`).
 
 Ejemplos de frases (propias, no son las del banco de evaluación):
 
@@ -28,6 +33,7 @@ Ejemplos de frases (propias, no son las del banco de evaluación):
 - "El sábado es el cumple de mi sobrino" → `crear_evento(titulo="Cumpleaños del sobrino", dia="sabado")`, de día completo
 - "¿Qué tengo pasado mañana?" → `listar_eventos(periodo="pasado manana")`
 - "Quita la tutoría" → `cancelar_evento(titulo="tutoría")`
+- "Retrasa la tutoría a las 19:00" → `editar_evento(titulo="tutoría", nueva_hora="19:00")`
 - "¿Me queda hora y media libre el jueves?" → `buscar_huecos(dia="jueves", duracion_min=90)`
 
 ## Frontend

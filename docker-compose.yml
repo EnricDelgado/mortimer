@@ -24,20 +24,30 @@ services:
       MODELO: ${MODELO:-granite4.1:3b}
       NUM_CTX: ${NUM_CTX:-8192}
       NUM_PREDICT: ${NUM_PREDICT:-160}
-      MODULOS: "http://prueba:8001"
+      MODULOS: "http://prueba:8001,http://calendario:8001"
       ZONA_HORARIA: Europe/Madrid
     volumes:
       # SQLite en disco local del servidor. No ponerlo en una carpeta del NAS montada
       # por SMB/NFS: los bloqueos de fichero de SQLite no son fiables en red.
       - "${DATA_LOCAL:-./data}/core:/data"
     ports: ["${PUERTO_CORE:-8000}:8000"]   # chat accesible desde la red de casa
-    depends_on: [ollama, prueba]
+    depends_on: [ollama, prueba, calendario]
 
   # Los módulos no publican puertos: solo el core habla con ellos, dentro de la red
   # interna de Docker (regla 1 de la arquitectura: el core es el único que conoce el mapa).
   prueba:
     build: ./modules/prueba
     restart: unless-stopped
+
+  # Incremento 1 (DEV-17). Sin CALENDARIO_PERMITIR_RESET: en producción /api/reset da 403.
+  calendario:
+    build: ./modules/calendario
+    restart: unless-stopped
+    environment:
+      ALLOWED_HOSTS: "calendario:*"           # protección DNS rebinding (DA-05)
+      ZONA_HORARIA: Europe/Madrid
+    volumes:
+      - "${DATA_LOCAL:-./data}/calendario:/data"   # disco local, como la base del core
 
 volumes:
   ollama:

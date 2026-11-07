@@ -11,6 +11,9 @@ ko()  { printf '  \033[31m✗\033[0m %s\n' "$1"; fallos=$((fallos+1)); }
 chat() { curl -sf -m 120 "$BASE/api/chat" -H 'Content-Type: application/json' -d "{\"texto\":\"$1\"}"; }
 
 echo "Smoke → $BASE"
+# Justo después de "up -d" o "start" el core tarda unos segundos en registrar
+# los módulos (ENR-02: el smoke salió en rojo por lanzarlo demasiado pronto).
+for _ in $(seq 1 30); do curl -sf -m 2 "$BASE/health" >/dev/null && break; sleep 1; done
 h=$(curl -sf -m 10 "$BASE/health") && ok "health: $h" || { ko "health no responde"; exit 1; }
 
 # Cada comprobación falla si la petición HTTP falla (antes daba verde con la
@@ -39,6 +42,7 @@ ics=$(curl -sf -m 10 "$BASE/m/calendario/calendario.ics" | head -c 15)
   || ko "calendario.ics no empieza por BEGIN:VCALENDAR: '${ics}'"
 
 r=$(chat "hola") && ok "conversación sin módulos" || ko "conversación sin módulos"
+echo "$r" | grep -q '"herramienta"' && ko "un saludo no debería usar herramientas: ${r:0:200}"
 
 r=$(chat "¿qué hora es?")
 echo "$r" | grep -q '"herramienta":"dime_la_hora"' && ok "enruta a dime_la_hora" \
