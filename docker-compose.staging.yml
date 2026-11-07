@@ -1,0 +1,51 @@
+# Pila de staging en el servidor: core y módulos de la rama en pruebas, en el puerto 8100.
+# Comparte el Ollama de producción: en 8 GB no caben dos modelos cargados.
+# Requiere que producción (/srv/mortimer) esté en marcha: usa su red "mortimer_default".
+#   docker compose -f docker-compose.staging.yml up -d --build
+#
+# Evaluación (fase 4): con MORTIMER_AHORA=2026-10-29T18:00 en el .env, el core y el
+# Calendario usan ese instante fijo en lugar del reloj real (fecha de referencia del
+# banco). Vacía o sin definir = hora real.
+name: mortimer-staging
+
+services:
+  core:
+    build: ./core
+    restart: "no"
+    environment:
+      OLLAMA_URL: http://ollama:11434         # el Ollama de producción, por la red compartida
+      MODELO: ${MODELO:-granite4.1:3b}
+      NUM_CTX: ${NUM_CTX:-8192}
+      NUM_PREDICT: ${NUM_PREDICT:-160}
+      MODULOS: "http://prueba-stg:8001,http://calendario-stg:8001"
+      ZONA_HORARIA: Europe/Madrid
+      MORTIMER_AHORA: ${MORTIMER_AHORA:-}     # reloj fijo solo para evaluación
+    volumes: ["./data/core:/data"]            # datos propios de staging
+    ports: ["8100:8000"]
+    networks: [default, prod]
+    depends_on: [prueba-stg, calendario-stg]
+
+  # Los módulos llevan sufijo -stg para que su nombre no choque con los de
+  # producción: el core de staging está en las dos redes.
+  # No publican puertos: el core es el único que habla con ellos (también
+  # sirve sus frontends y el .ics por el proxy /m/<modulo>/).
+  prueba-stg:
+    build: ./modules/prueba
+    restart: "no"
+    environment:
+      ALLOWED_HOSTS: "prueba-stg:*"           # protección DNS rebinding (DA-05)
+
+  calendario-stg:
+    build: ./modules/calendario
+    restart: "no"
+    environment:
+      ALLOWED_HOSTS: "calendario-stg:*"       # protección DNS rebinding (DA-05)
+      ZONA_HORARIA: Europe/Madrid
+      CALENDARIO_PERMITIR_RESET: "1"          # POST /api/reset, lo usa benchmarks/evaluacion/ejecutar.py
+      MORTIMER_AHORA: ${MORTIMER_AHORA:-}
+    volumes: ["./data/calendario:/data"]      # SQLite del calendario de staging
+
+networks:
+  prod:
+    external: true
+    name: mortimer_default

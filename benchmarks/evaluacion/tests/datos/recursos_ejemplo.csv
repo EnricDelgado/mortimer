@@ -1,0 +1,10 @@
+marca,contenedor,cpu_pct,mem_uso,mem_pct
+2026-11-18T10:00:00,mortimer-ollama-1,10.00%,3GiB / 7.66GiB,39.16%
+2026-11-18T10:00:00,mortimer-staging-core-1,2.00%,100MiB / 7.66GiB,1.27%
+2026-11-18T10:00:00,mortimer-staging-calendario-stg-1,0.50%,50MiB / 7.66GiB,0.64%
+2026-11-18T10:00:05,mortimer-ollama-1,390.00%,3.5GiB / 7.66GiB,45.69%
+2026-11-18T10:00:05,mortimer-staging-core-1,4.00%,140MiB / 7.66GiB,1.78%
+2026-11-18T10:00:05,mortimer-staging-calendario-stg-1,1.50%,54MiB / 7.66GiB,0.69%
+2026-11-18T10:00:10,mortimer-ollama-1,200.00%,3.25GiB / 7.66GiB,42.43%
+2026-11-18T10:00:10,mortimer-staging-core-1,--,-- / --,--
+2026-11-18T10:00:10,mortimer-staging-calendario-stg-1,1.00%,52MiB / 7.66GiB,0.66%

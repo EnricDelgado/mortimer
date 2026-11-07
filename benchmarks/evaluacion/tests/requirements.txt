@@ -1,0 +1,3 @@
+# Dependencias de las pruebas de benchmarks/evaluacion (además de core/requirements-dev.txt,
+# que ya trae pytest y httpx). PyYAML solo para leer docker-compose.staging.yml.
+pyyaml
