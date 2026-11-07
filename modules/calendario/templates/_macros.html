@@ -1,0 +1,62 @@
+{# Piezas reutilizables. Todas las URL son relativas: `raiz` lleva a la raíz del módulo. #}
+
+{% macro ocultos(raiz, volver) %}
+<input type="hidden" name="raiz" value="{{ raiz }}">
+<input type="hidden" name="volver" value="{{ volver }}">
+{% endmacro %}
+
+{% macro campos(e, p) %}
+<div class="campo">
+  <label for="{{ p }}-titulo">Título</label>
+  <input id="{{ p }}-titulo" name="titulo" type="text" value="{{ e.titulo or '' }}" maxlength="200" required autocomplete="off">
+</div>
+<div class="campo">
+  <label for="{{ p }}-fecha">Fecha</label>
+  <input id="{{ p }}-fecha" name="fecha" type="date" value="{{ e.fecha or '' }}" required>
+</div>
+<div class="campos-hora">
+  <div class="campo">
+    <label for="{{ p }}-hora">Desde</label>
+    <input id="{{ p }}-hora" name="hora" type="time" value="{{ e.hora or '' }}">
+  </div>
+  <div class="campo">
+    <label for="{{ p }}-hora_fin">Hasta</label>
+    <input id="{{ p }}-hora_fin" name="hora_fin" type="time" value="{{ e.hora_fin or '' }}">
+  </div>
+</div>
+<label class="casilla"><input type="checkbox" name="todo_el_dia" value="1"{% if e.todo_el_dia in (true, '1', 'on') %} checked{% endif %}> Todo el día</label>
+<p class="pista">Sin hora, el evento ocupa el día completo. Sin «hasta», dura una hora.</p>
+<div class="campo">
+  <label for="{{ p }}-ubicacion">Lugar <span class="opcional">(opcional)</span></label>
+  <input id="{{ p }}-ubicacion" name="ubicacion" type="text" value="{{ e.ubicacion or '' }}" maxlength="200" autocomplete="off">
+</div>
+<div class="campo">
+  <label for="{{ p }}-notas">Notas <span class="opcional">(opcional)</span></label>
+  <textarea id="{{ p }}-notas" name="notas" rows="2" maxlength="2000">{{ e.notas or '' }}</textarea>
+</div>
+{% endmacro %}
+
+{% macro evento(e, raiz, volver, p) %}
+<details class="ev{% if e.todo_el_dia or e.continua %} completo{% endif %}{% if e.origen == 'asistente' %} asistente{% endif %}">
+  <summary>
+    <span class="cuando">{{ e.cuando }}</span>
+    <span class="titulo">{{ e.titulo }}</span>
+    {% if e.ubicacion %}<span class="lugar">{{ e.ubicacion }}</span>{% endif %}
+    {% if e.origen == 'asistente' %}<span class="chip" title="Lo creó Mortimer desde el chat">vía chat</span>{% endif %}
+  </summary>
+  <div class="detalle">
+    {% if e.notas %}<p class="notas">{{ e.notas }}</p>{% endif %}
+    <form class="formulario" method="post" action="{{ raiz }}ui/eventos/{{ e.id|urlencode }}"
+          hx-post="{{ raiz }}ui/eventos/{{ e.id|urlencode }}" hx-target="#vista">
+      {{ ocultos(raiz, volver) }}
+      {{ campos(e, p) }}
+      <div class="acciones"><button type="submit">Guardar cambios</button></div>
+    </form>
+    <form class="acciones" method="post" action="{{ raiz }}ui/eventos/{{ e.id|urlencode }}/cancelar"
+          hx-post="{{ raiz }}ui/eventos/{{ e.id|urlencode }}/cancelar" hx-target="#vista">
+      {{ ocultos(raiz, volver) }}
+      <button type="submit" class="secundario peligro">Cancelar este evento</button>
+    </form>
+  </div>
+</details>
+{% endmacro %}

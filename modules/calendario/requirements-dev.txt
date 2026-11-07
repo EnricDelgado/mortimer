@@ -1,0 +1,8 @@
+-r requirements.txt
+pytest
+pytest-asyncio
+httpx
+# Solo para validar el .ics en las pruebas (DEV-04); no se usa en producción.
+icalendar
+# Solo para la prueba del docker-compose (test_web.py).
+pyyaml

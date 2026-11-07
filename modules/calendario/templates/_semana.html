@@ -1,0 +1,19 @@
+{% from "_macros.html" import evento %}
+<ol class="semana" aria-label="Días de la semana">
+  {% for d in dias %}
+  <li class="dia{% if d.es_hoy %} hoy{% endif %}{% if d.pasado %} pasado{% endif %}" id="d-{{ d.fecha }}"{% if d.es_hoy %} aria-current="date"{% endif %}>
+    <div class="dia-cabecera">
+      <h2><span class="nombre">{{ d.nombre }}</span> <span class="numero">{{ d.numero }}</span>{% if d.es_hoy %} <span class="etiqueta-hoy">hoy</span>{% endif %}</h2>
+      <button type="button" class="anadir" data-fecha="{{ d.fecha }}" onclick="nuevoEn(this.dataset.fecha)"
+              aria-label="Añadir evento el {{ d.nombre|lower }} {{ d.numero }} de {{ d.mes }}">+</button>
+    </div>
+    {% if d.eventos %}
+    <ul class="eventos">
+      {% for e in d.eventos %}<li>{{ evento(e, raiz, volver, "ed-" ~ d.fecha ~ "-" ~ loop.index) }}</li>{% endfor %}
+    </ul>
+    {% else %}
+    <p class="vacio">Libre</p>
+    {% endif %}
+  </li>
+  {% endfor %}
+</ol>

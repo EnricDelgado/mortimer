@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Calendario · Mortimer</title>
+  {# Rutas relativas: el módulo se sirve tras el proxy del core (/m/calendario/). #}
+  <script src="{{ raiz }}ui/static/htmx.min.js" defer></script>
+  <style>
+    :root {
+      --fondo:#f7f6f3; --superficie:#fff; --texto:#1f1f1c; --tenue:#6b6a64; --borde:#dedcd5;
+      --acento:#2f5d50; --acento-suave:#e3ece8; --sobre-acento:#fff;
+      --aviso:#8a5a00; --aviso-fondo:#fbf1dc; --error:#a3392d; --error-fondo:#f8e3e0;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --fondo:#1b1b19; --superficie:#252522; --texto:#ecebe6; --tenue:#9b9a93; --borde:#3a3a35;
+        --acento:#7fb8a6; --acento-suave:#26352f; --sobre-acento:#10201b;
+        --aviso:#e7c06b; --aviso-fondo:#3a3020; --error:#f0a197; --error-fondo:#3d2522;
+      }
+    }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--fondo); color:var(--texto); font:16px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+    a { color:var(--acento); }
+    h1, h2 { margin:0; font-weight:600; }
+    h1 { font-size:20px; }
+    h2 { font-size:16px; }
+    .oculto { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); }
+    .barra { border-bottom:1px solid var(--borde); background:var(--superficie); }
+    .barra .contenedor { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 16px; }
+    .marca { font-weight:600; text-decoration:none; color:var(--texto); }
+    .marca span { color:var(--tenue); font-weight:400; }
+    .contenedor { max-width:1180px; margin:0 auto; }
+    main { padding:16px 16px 96px; }
+
+    /* Botones y formularios */
+    button, .boton { font:inherit; font-size:15px; display:inline-flex; align-items:center; justify-content:center;
+      min-height:40px; padding:8px 14px; border:1px solid var(--acento); border-radius:10px; background:var(--acento);
+      color:var(--sobre-acento); cursor:pointer; text-decoration:none; }
+    .secundario { background:transparent; color:var(--acento); border-color:var(--borde); }
+    .secundario.activo { border-color:var(--acento); }
+    .peligro { color:var(--error); }
+    .htmx-request button[type=submit] { opacity:.5; }
+    .formulario { display:flex; flex-direction:column; gap:10px; }
+    .campo { display:flex; flex-direction:column; gap:3px; }
+    .campo label { font-size:13px; color:var(--tenue); }
+    .opcional { font-size:12px; }
+    input[type=text], input[type=date], input[type=time], textarea {
+      font:inherit; width:100%; padding:9px 10px; border:1px solid var(--borde); border-radius:8px;
+      background:var(--superficie); color:var(--texto); }
+    input:focus-visible, textarea:focus-visible, button:focus-visible, a:focus-visible, summary:focus-visible {
+      outline:2px solid var(--acento); outline-offset:2px; }
+    .campos-hora { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+    .casilla { display:flex; align-items:center; gap:8px; }
+    .casilla input { width:20px; height:20px; accent-color:var(--acento); }
+    .pista { margin:0; font-size:13px; color:var(--tenue); }
+    .acciones { display:flex; gap:8px; flex-wrap:wrap; }
+    .tarjeta { background:var(--superficie); border:1px solid var(--borde); border-radius:12px; padding:14px; }
+    summary { cursor:pointer; }
+
+    /* Cabecera de la vista */
+    .cabecera-vista { display:flex; flex-wrap:wrap; align-items:center; gap:10px 16px; margin-bottom:14px; }
+    .cabecera-vista h1 { flex:1 1 100%; }
+    .navegacion { display:flex; gap:6px; }
+    .navegacion .boton { min-width:44px; }
+    .selector { display:flex; border:1px solid var(--borde); border-radius:10px; overflow:hidden; margin-left:auto; }
+    .selector .opcion { padding:8px 14px; min-height:40px; display:inline-flex; align-items:center; text-decoration:none; color:var(--acento); }
+    .selector .actual { background:var(--acento-suave); color:var(--texto); font-weight:600; }
+    @media (min-width:700px) { .cabecera-vista h1 { flex:1 1 auto; } .selector { margin-left:0; } }
+
+    /* Alta */
+    .alta { margin-bottom:16px; }
+    .alta > summary { list-style:none; width:max-content; }
+    .alta > summary::-webkit-details-marker { display:none; }
+    .alta[open] > summary { margin-bottom:10px; background:transparent; color:var(--acento); }
+    .alta .formulario { max-width:520px; }
+
+    /* Avisos */
+    .aviso { position:fixed; left:16px; right:16px; bottom:16px; z-index:10; max-width:640px; margin:0 auto;
+      display:flex; gap:10px; align-items:flex-start; padding:12px 14px; border-radius:12px;
+      border:1px solid var(--borde); background:var(--superficie); box-shadow:0 6px 24px rgba(0,0,0,.15); }
+    .aviso span { flex:1; }
+    .aviso.ok { border-color:var(--acento); }
+    .aviso.atencion { background:var(--aviso-fondo); color:var(--aviso); border-color:var(--aviso); }
+    .aviso.error { background:var(--error-fondo); color:var(--error); border-color:var(--error); }
+    .cerrar { min-height:28px; padding:0 8px; background:transparent; border:0; color:inherit; font-size:20px; line-height:1; }
+
+    /* Semana: lista en el móvil, siete columnas en pantallas anchas */
+    .semana { list-style:none; margin:0; padding:0; display:grid; gap:10px; }
+    @media (min-width:1000px) { .semana { grid-template-columns:repeat(7, minmax(0, 1fr)); gap:8px; } }
+    .dia { background:var(--superficie); border:1px solid var(--borde); border-radius:12px; padding:10px 12px; min-width:0; }
+    .dia.hoy { border-color:var(--acento); box-shadow:inset 0 3px 0 var(--acento); }
+    .dia.pasado { opacity:.72; }
+    .dia-cabecera { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:6px; }
+    .dia-cabecera .numero { color:var(--tenue); font-weight:400; }
+    .etiqueta-hoy { font-size:12px; font-weight:600; color:var(--acento); text-transform:uppercase; letter-spacing:.04em; }
+    .anadir { min-height:32px; min-width:32px; padding:0; border-radius:8px; background:transparent; color:var(--acento); border-color:var(--borde); font-size:20px; }
+    .eventos { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:6px; }
+    .vacio { margin:0; color:var(--tenue); font-size:14px; }
+    .ev { border-left:3px solid var(--acento); background:var(--fondo); border-radius:6px; }
+    .ev.completo { background:var(--acento-suave); }
+    .ev.asistente { border-left-style:dashed; }
+    .ev > summary { list-style:none; padding:7px 9px; display:flex; flex-wrap:wrap; gap:2px 8px; align-items:baseline; }
+    .ev > summary::-webkit-details-marker { display:none; }
+    .ev .cuando { font-size:13px; color:var(--tenue); font-variant-numeric:tabular-nums; }
+    .ev .titulo { font-weight:600; overflow-wrap:anywhere; }
+    .ev .lugar { font-size:13px; color:var(--tenue); flex-basis:100%; }
+    .chip { font-size:11px; border:1px solid var(--borde); border-radius:999px; padding:0 7px; color:var(--tenue); }
+    .ev .detalle { padding:4px 9px 12px; display:flex; flex-direction:column; gap:10px; }
+    .ev[open] { background:var(--superficie); box-shadow:0 0 0 1px var(--borde); }
+    .notas { margin:0; white-space:pre-wrap; font-size:14px; }
+    @media (min-width:1000px) { .ev .cuando, .ev .lugar { flex-basis:100%; } .campos-hora { grid-template-columns:1fr; } .dia-cabecera h2 { font-size:15px; white-space:nowrap; } }
+
+    /* Mes */
+    .mes { width:100%; table-layout:fixed; border-collapse:separate; border-spacing:4px; margin:0 -4px; }
+    .mes th { font-size:12px; font-weight:600; color:var(--tenue); text-transform:uppercase; padding:2px 0; }
+    .mes td { vertical-align:top; background:var(--superficie); border:1px solid var(--borde); border-radius:8px;
+      padding:4px; height:96px; overflow:hidden; }
+    .mes td.fuera { background:transparent; }
+    .mes td.fuera .num { color:var(--tenue); }
+    .mes td.hoy { border-color:var(--acento); box-shadow:inset 0 3px 0 var(--acento); }
+    .mes .num { display:inline-flex; min-width:28px; min-height:28px; align-items:center; justify-content:center;
+      border-radius:999px; font-weight:600; text-decoration:none; color:var(--texto); }
+    .mes td.hoy .num { background:var(--acento); color:var(--sobre-acento); }
+    .eventos-celda { list-style:none; margin:2px 0 0; padding:0; }
+    .eventos-celda li { font-size:12px; line-height:1.3; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+      border-left:2px solid var(--acento); padding-left:4px; margin-bottom:2px; }
+    .eventos-celda li.completo { background:var(--acento-suave); border-radius:3px; }
+    .eventos-celda .h { color:var(--tenue); font-variant-numeric:tabular-nums; }
+    .mes .mas { font-size:11px; color:var(--tenue); }
+    .puntos { display:none; gap:3px; justify-content:center; margin-top:4px; }
+    .puntos i { width:6px; height:6px; border-radius:50%; background:var(--acento); }
+    @media (max-width:640px) {
+      .mes { border-spacing:2px; margin:0 -2px; }
+      .mes td { height:56px; padding:2px; text-align:center; }
+      .eventos-celda, .mes .mas { display:none; }
+      .puntos { display:flex; }
+    }
+
+    /* Cancelados y suscripción */
+    .cancelados, .suscribir { margin-top:24px; background:var(--superficie); border:1px solid var(--borde); border-radius:12px; padding:12px 14px; }
+    .cancelados summary h2 { display:inline; }
+    .contador { font-weight:400; color:var(--tenue); }
+    .cancelados ul { list-style:none; margin:10px 0 0; padding:0; display:flex; flex-direction:column; gap:8px; }
+    .cancelados li { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; }
+    .tachado { text-decoration:line-through; color:var(--tenue); }
+    .cancelados .pista { margin-top:8px; }
+    .suscribir p { margin:8px 0; }
+    .fila-url { display:flex; gap:8px; }
+    .fila-url input { flex:1; min-width:0; font-family:ui-monospace, monospace; font-size:14px; }
+    .suscribir details { margin-top:8px; }
+    .suscribir summary { font-weight:600; padding:4px 0; }
+    .suscribir ol { margin:6px 0; padding-left:22px; }
+    .suscribir li { margin-bottom:4px; }
+    .nota { font-size:13px; color:var(--tenue); }
+  </style>
+</head>
+<body>
+<header class="barra">
+  <div class="contenedor">
+    <a class="marca" href="{{ raiz }}../../">Mortimer <span>· Calendario</span></a>
+    <a href="{{ raiz }}../../">Volver al chat</a>
+  </div>
+</header>
+<main class="contenedor">
+<div id="vista">
+{% include "_vista.html" %}
+</div>
+<section class="suscribir" aria-labelledby="t-suscribir">
+  <h2 id="t-suscribir">Ver el calendario en el móvil</h2>
+  <p>Puedes suscribirte a este calendario desde la app de calendario del móvil. Lo verás junto a tus otros calendarios y se actualizará solo, cada cierto tiempo (no al instante). Es de solo lectura: los cambios se hacen aquí o en el chat.</p>
+  <div class="fila-url">
+    <input id="url-ics" type="text" readonly data-ruta="{{ raiz }}calendario.ics" value="{{ raiz }}calendario.ics" aria-label="Dirección del calendario">
+    <button type="button" onclick="copiarIcs(this)">Copiar</button>
+  </div>
+  <p class="nota">El móvil tiene que estar en la misma red que el servidor de Mortimer. <a href="{{ raiz }}calendario.ics">Descargar el fichero .ics</a></p>
+  <details>
+    <summary>iPhone</summary>
+    <ol>
+      <li>Copia la dirección de arriba.</li>
+      <li>Abre <b>Ajustes › Apps › Calendario › Cuentas de calendario › Añadir cuenta › Otra</b> (en iOS 17 o anterior: <b>Ajustes › Calendario › Cuentas › Añadir cuenta › Otra</b>).</li>
+      <li>Pulsa <b>Añadir calendario suscrito</b>, pega la dirección y pulsa <b>Siguiente</b>.</li>
+      <li>Si avisa de que no puede conectarse con SSL, pulsa <b>Continuar</b>: el servidor está en tu red de casa.</li>
+      <li>Pulsa <b>Guardar</b>. El calendario aparece como «Mortimer».</li>
+    </ol>
+  </details>
+  <details>
+    <summary>Android</summary>
+    <ol>
+      <li>Instala <b>ICSx⁵</b> (gratuita, en Google Play y en F-Droid).</li>
+      <li>Ábrela, pulsa <b>+</b>, pega la dirección y sigue el asistente.</li>
+      <li>El calendario aparece como «Mortimer» en la app de Calendario del móvil, también en Google Calendar.</li>
+    </ol>
+    <p class="nota">No uses «Añadir calendario desde URL» de la web de Google Calendar: lo descargan los servidores de Google, que no llegan a tu servidor de casa. ICSx⁵ lo descarga desde el propio móvil.</p>
+  </details>
+</section>
+</main>
+<script>
+  // Alta rápida desde el «+» de cada día: abre el formulario con esa fecha.
+  function nuevoEn(fecha) {
+    var alta = document.getElementById('alta');
+    if (!alta) return;
+    alta.open = true;
+    var f = alta.querySelector('[name=fecha]'); if (f) f.value = fecha;
+    alta.scrollIntoView({behavior: 'smooth', block: 'start'});
+    var t = alta.querySelector('[name=titulo]'); if (t) t.focus({preventScroll: true});
+  }
+  // Dirección completa del .ics, calculada en el navegador a partir de la ruta relativa
+  // (así sirve igual tras el proxy del core que contra el módulo directamente).
+  function rellenarIcs() {
+    var i = document.getElementById('url-ics');
+    if (i) i.value = new URL(i.dataset.ruta, window.location.href).href;
+  }
+  function copiarIcs(boton) {
+    var i = document.getElementById('url-ics');
+    i.focus(); i.select();
+    var hecho = false;
+    if (navigator.clipboard && window.isSecureContext) { navigator.clipboard.writeText(i.value); hecho = true; }
+    else { try { hecho = document.execCommand('copy'); } catch (e) {} }
+    boton.textContent = hecho ? 'Copiada' : 'Cópiala a mano';
+  }
+  document.addEventListener('DOMContentLoaded', rellenarIcs);
+</script>
+</body>
+</html>

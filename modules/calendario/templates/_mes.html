@@ -1,0 +1,26 @@
+<table class="mes">
+  <caption class="oculto">{{ titulo }}</caption>
+  <thead><tr>{% for c in cabeceras %}<th scope="col">{{ c }}</th>{% endfor %}</tr></thead>
+  <tbody>
+    {% for semana in semanas %}
+    <tr>
+      {% for c in semana %}
+      <td class="{% if not c.del_mes %}fuera{% endif %}{% if c.es_hoy %} hoy{% endif %}{% if c.pasado %} pasado{% endif %}"{% if c.es_hoy %} aria-current="date"{% endif %}>
+        <a class="num" href="{{ raiz }}ui?semana={{ c.fecha }}#d-{{ c.fecha }}"
+           aria-label="{{ c.numero }}: {{ c.n }} evento{{ '' if c.n == 1 else 's' }}. Ver la semana">{{ c.numero }}</a>
+        {% if c.eventos %}
+        <ul class="eventos-celda">
+          {% for e in c.eventos %}
+          <li class="{% if e.todo_el_dia or e.continua %}completo{% endif %}{% if e.origen == 'asistente' %} asistente{% endif %}">{% if e.corto and not e.continua %}<span class="h">{{ e.corto }}</span> {% endif %}{{ e.titulo }}</li>
+          {% endfor %}
+        </ul>
+        {% if c.mas %}<span class="mas">+{{ c.mas }} más</span>{% endif %}
+        <span class="puntos" aria-hidden="true">{% for _ in range([c.n, 4]|min) %}<i></i>{% endfor %}</span>
+        {% endif %}
+      </td>
+      {% endfor %}
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+<p class="pista">Pulsa un día para ver su semana y editar sus eventos.</p>

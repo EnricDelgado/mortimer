@@ -13,10 +13,16 @@ Formas admitidas para un día:
     2026-11-03 · 3/11 · 3/11/2026 · 3 de noviembre [de 2026]
 Formas admitidas para un periodo:
     cualquier día · esta semana · semana que viene · este mes · mes que viene · fin de semana
+
+Tolerancia (Incremento 1, DEV-01): las palabras clave (días, meses, "mañana",
+"semana", "que viene"…) se corrigen con difflib si llegan con una errata
+("vierns", "semna"), y "finde" equivale a "fin de semana". Para la hora se
+admiten "mediodía" (12:00) y "medianoche" (00:00).
 """
 
 from __future__ import annotations
 
+import difflib
 import re
 import unicodedata
 from datetime import date, datetime, time, timedelta
@@ -28,11 +34,38 @@ MESES = {"enero": 1, "febrero": 2, "marzo": 3, "abril": 4, "mayo": 5, "junio": 6
          "noviembre": 11, "diciembre": 12}
 _RELLENO = re.compile(r"\b(el|la|los|las|este|esta|proximo|proxima|que viene|siguiente|dia)\b")
 
+# Vocabulario contra el que se corrigen las erratas. Solo palabras de 4 letras
+# o más: en las cortas ("mes", "hoy") una errata deja una palabra demasiado
+# distinta para corregirla con seguridad.
+_VOCABULARIO = sorted(
+    set(DIAS_SEMANA) | set(MESES)
+    | {"manana", "pasado", "semana", "viene", "proximo", "proxima", "siguiente"}
+)
+_VOCABULARIO_HORA = ["mediodia", "medianoche"]
+_CORTE_ERRATAS = 0.75
+
 
 def normalizar(texto: str) -> str:
     t = unicodedata.normalize("NFKD", str(texto).lower())
     t = "".join(c for c in t if not unicodedata.combining(c))
     return re.sub(r"\s+", " ", t).strip()
+
+
+def _corregir(texto: str, vocabulario: list[str] = _VOCABULARIO) -> str:
+    """Sustituye cada palabra con una errata por la palabra clave más parecida.
+
+    Trabaja sobre texto ya normalizado. Las palabras que ya están en el
+    vocabulario, las de menos de 4 letras y las que llevan cifras no se tocan.
+    """
+    def una(m: re.Match) -> str:
+        p = m.group(0)
+        if len(p) < 4 or p in vocabulario:
+            return p
+        cerca = difflib.get_close_matches(p, vocabulario, n=1, cutoff=_CORTE_ERRATAS)
+        return cerca[0] if cerca else p
+
+    t = re.sub(r"[a-z]+", una, texto)
+    return re.sub(r"\bfinde\b", "fin de semana", t)
 
 
 def _siguiente(hoy: date, dia_semana: int) -> date:
@@ -50,11 +83,14 @@ def _siguiente(hoy: date, dia_semana: int) -> date:
 def resolver_dia(expr: str | None, hoy: date) -> date | None:
     if not expr:
         return None
-    t = normalizar(expr)
+    t = _corregir(normalizar(expr))
 
     m = re.search(r"(\d{4})-(\d{2})-(\d{2})", t)
     if m:
-        return date(int(m[1]), int(m[2]), int(m[3]))
+        try:
+            return date(int(m[1]), int(m[2]), int(m[3]))
+        except ValueError:  # "2026-13-45", "2026-02-30": fecha imposible
+            return None
     m = re.fullmatch(r"(\d{1,2})/(\d{1,2})(?:/(\d{2,4}))?", t)
     if m:
         return _con_anio(int(m[1]), int(m[2]), m[3], hoy)
@@ -74,6 +110,17 @@ def resolver_dia(expr: str | None, hoy: date) -> date | None:
     return None
 
 
+def resolver_dia_con_reloj(expr: str | None, ahora: datetime) -> date | None:
+    """Como resolver_dia, pero a partir del instante actual con zona horaria.
+
+    Lo usa el dominio: el reloj del módulo (hora real o MORTIMER_AHORA) ya
+    está en la zona del usuario, así que "hoy" es la fecha local de ese instante.
+    """
+    if ahora.tzinfo is None or ahora.utcoffset() is None:
+        raise ValueError("resolver_dia_con_reloj necesita un datetime con zona horaria")
+    return resolver_dia(expr, ahora.date())
+
+
 def _con_anio(d: int, m: int, anio: str | None, hoy: date) -> date | None:
     try:
         if anio:
@@ -87,11 +134,18 @@ def _con_anio(d: int, m: int, anio: str | None, hoy: date) -> date | None:
 
 
 def resolver_hora(expr: str | None) -> time | None:
-    """Acepta 'HH:MM', 'H', '9h', '21.30'. La conversión '5 de la tarde' → 17:00
-    la hace el modelo; en el spike no falló ni una vez."""
+    """Acepta 'HH:MM', 'H', '9h', '21.30', 'mediodía' y 'medianoche'. La
+    conversión '5 de la tarde' → 17:00 la hace el modelo; en el spike no falló
+    ni una vez."""
     if expr is None or expr == "":
         return None
-    m = re.search(r"(\d{1,2})(?:[:.h](\d{2}))?", normalizar(expr))
+    t = _corregir(normalizar(expr), _VOCABULARIO_HORA)
+    # Las palabras van antes que las cifras: "las 12 del mediodía" → 12:00.
+    if re.search(r"\bmediodia\b", t):
+        return time(12, 0)
+    if re.search(r"\bmedianoche\b", t):
+        return time(0, 0)
+    m = re.search(r"(\d{1,2})(?:[:.h](\d{2}))?", t)
     if not m:
         return None
     h, mi = int(m[1]), int(m[2] or 0)
@@ -109,7 +163,7 @@ def resolver_periodo(expr: str | None, hoy: date) -> tuple[date, date] | None:
     """Devuelve (desde, hasta), ambos inclusive."""
     if not expr:
         return None
-    t = normalizar(expr)
+    t = _corregir(normalizar(expr))
     lunes = hoy - timedelta(days=hoy.weekday())
     if "fin de semana" in t:
         sab = lunes + timedelta(days=5)

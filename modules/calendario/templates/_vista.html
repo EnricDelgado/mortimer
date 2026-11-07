@@ -1,0 +1,63 @@
+{# Contenido de #vista. Es lo que devuelven las acciones htmx; pagina.html lo incluye entero. #}
+{% from "_macros.html" import ocultos, campos %}
+{% if aviso %}
+<div id="aviso" class="aviso {{ aviso.tipo }}" role="{{ 'alert' if aviso.tipo == 'error' else 'status' }}">
+  <span>{{ aviso.texto }}</span>
+  <button type="button" class="cerrar" onclick="this.parentElement.remove()" aria-label="Cerrar aviso">×</button>
+</div>
+{% endif %}
+
+<div class="cabecera-vista">
+  <h1>{{ titulo }}</h1>
+  <nav class="navegacion" aria-label="Cambiar de {{ vista }}">
+    <a class="boton secundario" href="{{ raiz }}{{ anterior }}" aria-label="{{ 'Semana' if vista == 'semana' else 'Mes' }} anterior">‹</a>
+    <a class="boton secundario{% if es_actual %} activo{% endif %}" href="{{ raiz }}{{ actual }}">Hoy</a>
+    <a class="boton secundario" href="{{ raiz }}{{ siguiente }}" aria-label="{{ 'Semana' if vista == 'semana' else 'Mes' }} siguiente">›</a>
+  </nav>
+  <nav class="selector" aria-label="Vista">
+    {% if vista == 'semana' %}
+    <span class="opcion actual" aria-current="page">Semana</span><a class="opcion" href="{{ raiz }}{{ otra_vista }}">Mes</a>
+    {% else %}
+    <a class="opcion" href="{{ raiz }}{{ otra_vista }}">Semana</a><span class="opcion actual" aria-current="page">Mes</span>
+    {% endif %}
+  </nav>
+</div>
+
+<details id="alta" class="alta"{% if alta_abierta %} open{% endif %}>
+  <summary class="boton">+ Nuevo evento</summary>
+  <form class="formulario tarjeta" method="post" action="{{ raiz }}ui/eventos"
+        hx-post="{{ raiz }}ui/eventos" hx-target="#vista">
+    {{ ocultos(raiz, volver) }}
+    {{ campos(alta, "alta") }}
+    <div class="acciones"><button type="submit">Añadir</button></div>
+  </form>
+</details>
+
+{% if vista == 'semana' %}
+{% include "_semana.html" %}
+{% else %}
+{% include "_mes.html" %}
+{% endif %}
+
+<section class="cancelados" aria-labelledby="t-cancelados">
+  <details{% if abrir_cancelados %} open{% endif %}>
+    <summary><h2 id="t-cancelados">Cancelados <span class="contador">{{ cancelados|length }}</span></h2></summary>
+    {% if cancelados %}
+    <p class="pista">Cancelar no borra: puedes restaurar cualquiera de estos eventos.</p>
+    <ul>
+      {% for e in cancelados %}
+      <li>
+        <span class="tachado">{{ e.descripcion }}</span>
+        <form method="post" action="{{ raiz }}ui/eventos/{{ e.id|urlencode }}/restaurar"
+              hx-post="{{ raiz }}ui/eventos/{{ e.id|urlencode }}/restaurar" hx-target="#vista">
+          {{ ocultos(raiz, volver) }}
+          <button type="submit" class="secundario">Restaurar</button>
+        </form>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="vacio">No hay eventos cancelados.</p>
+    {% endif %}
+  </details>
+</section>

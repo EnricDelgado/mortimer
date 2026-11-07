@@ -1,0 +1,315 @@
+"""Módulo Calendario de Mortimer (Incremento 1).
+
+Cumple el contrato de módulo (DA-05) igual que modules/prueba: un servidor
+MCP con sus herramientas, rutas HTTP propias en el mismo puerto (8001),
+/health y un frontend en /ui. Además publica el calendario como .ics
+suscribible (RF-06) y una API REST que usan el frontend y el ejecutor del
+banco de evaluación.
+
+Herramientas (esquema v2, DA-08): el modelo extrae expresiones ("el viernes",
+"17:00") y el módulo calcula las fechas. Todas devuelven
+{"texto", "final", "datos"}; con final=True el core puede mostrar el texto sin
+otra ronda del LLM.
+
+Variables de entorno:
+  DATA_DIR                   carpeta de datos (por defecto /data)
+  ZONA_HORARIA               zona del usuario (Europe/Madrid)
+  ALLOWED_HOSTS              hosts aceptados (localhost:*,127.0.0.1:*,calendario:*)
+  CALENDARIO_PERMITIR_RESET  "1" habilita POST /api/reset (solo staging/evaluación)
+  MORTIMER_AHORA             instante fijo ISO (p. ej. 2026-10-29T18:00), solo pruebas
+  HUECOS_DESDE / HUECOS_HASTA  franja de buscar_huecos (08:00-21:00)
+"""
+
+from __future__ import annotations
+
+import json
+import os
+from datetime import datetime
+from pathlib import Path
+from typing import Annotated, Any, Callable, TypedDict
+from zoneinfo import ZoneInfo
+
+from mcp.server import MCPServer
+from mcp.server.transport_security import TransportSecuritySettings
+from mcp.types import CallToolResult, TextContent
+from pydantic import Field, WithJsonSchema
+from starlette.datastructures import Headers
+from starlette.requests import Request
+from starlette.responses import JSONResponse, PlainTextResponse, Response
+
+from . import ics, web
+from .db import BaseDatos
+from .dominio import Calendario, ErrorValidacion, NoEncontrado, a_bool
+
+NOMBRE = "calendario"
+VERSION = "0.1.0"
+HOSTS_POR_DEFECTO = f"localhost:*,127.0.0.1:*,{NOMBRE}:*"
+
+
+# ── Configuración desde el entorno ────────────────────────────────────────
+
+def reloj_desde_entorno(zona: ZoneInfo, valor: str | None = None) -> Callable[[], datetime]:
+    """Hora real en la zona del usuario o, si existe MORTIMER_AHORA, ese instante fijo."""
+    valor = os.environ.get("MORTIMER_AHORA", "") if valor is None else valor
+    valor = valor.strip()
+    if not valor:
+        return lambda: datetime.now(zona)
+    fijo = datetime.fromisoformat(valor.replace("Z", "+00:00"))
+    fijo = fijo.replace(tzinfo=zona) if fijo.tzinfo is None else fijo.astimezone(zona)
+    return lambda: fijo
+
+
+def servicio_desde_entorno() -> Calendario:
+    zona = ZoneInfo(os.environ.get("ZONA_HORARIA", "Europe/Madrid"))
+    datos = Path(os.environ.get("DATA_DIR", "/data"))
+    # La base no se crea hasta la primera operación: importar este módulo
+    # (por ejemplo, para listar sus herramientas en una prueba) no toca el disco.
+    return Calendario(
+        BaseDatos(datos / "calendario.db"), zona, reloj_desde_entorno(zona),
+        huecos_desde=os.environ.get("HUECOS_DESDE", "08:00"),
+        huecos_hasta=os.environ.get("HUECOS_HASTA", "21:00"),
+    )
+
+
+# ── Herramientas MCP ──────────────────────────────────────────────────────
+
+class Resultado(TypedDict):
+    texto: str
+    final: bool
+    datos: dict[str, Any]
+
+
+def _a_mcp(r: dict[str, Any]) -> CallToolResult:
+    # Contenido estructurado {"texto","final","datos"} y, como texto, la frase
+    # para el usuario: es lo que verá el LLM si el core hace otra ronda.
+    return CallToolResult(content=[TextContent(type="text", text=r["texto"])], structured_content=r)
+
+
+DIA = ("Día tal como lo dice el usuario, sin calcular la fecha. Una de estas palabras: "
+       "hoy, manana, pasado manana, lunes, martes, miercoles, jueves, viernes, sabado, domingo; "
+       "o una fecha explícita ('3 de noviembre', '2026-11-03').")
+HORA = "Hora de inicio en formato 24 h HH:MM, p. ej. '17:00' para 'las cinco de la tarde'. Vacía si no se dice."
+
+# Tipos tolerantes (QA A-06): el esquema que ve el modelo no cambia ("string" e
+# "integer", contrato §3.2), pero se aceptan valores de otro tipo (un modelo
+# pequeño manda "hora": 10 o "duracion_min": "una hora") y el dominio los
+# interpreta o responde con final=True. Así la validación del SDK nunca deja
+# una llamada sin respuesta final.
+Texto = Annotated[str | int | float | None, WithJsonSchema({"type": "string"})]
+Entero = Annotated[int | float | str | None, WithJsonSchema({"type": "integer"})]
+
+
+def _texto(valor: Any) -> str:
+    """None → ''; 10 → '10'; 10.5 → '10.5'."""
+    if valor is None:
+        return ""
+    if isinstance(valor, float) and valor.is_integer():
+        valor = int(valor)
+    return str(valor)
+
+
+def crear_servidor(servicio: Calendario) -> MCPServer:
+    mcp = MCPServer(
+        NOMBRE,
+        version=VERSION,
+        instructions="Calendario personal: crea, consulta y cancela eventos y busca huecos libres.",
+    )
+
+    @mcp.tool()
+    def crear_evento(
+        titulo: Annotated[str, Field(description="Título breve del evento, p. ej. 'Dentista'.")],
+        dia: Annotated[str, Field(description=DIA)],
+        hora: Annotated[Texto, Field(description=HORA + " Sin hora, el evento ocupa el día completo.")] = "",
+        hora_fin: Annotated[Texto, Field(description="Hora de fin HH:MM, solo si el usuario la dice.")] = "",
+        ubicacion: Annotated[str, Field(description="Lugar, solo si el usuario lo dice.")] = "",
+    ) -> Annotated[CallToolResult, Resultado]:
+        """Crea un evento en el calendario. Úsala también cuando el usuario cuenta que tiene algo ('tengo dentista el martes', 'me ha surgido una reunión')."""
+        return _a_mcp(servicio.crear(titulo, dia, _texto(hora), _texto(hora_fin), ubicacion))
+
+    @mcp.tool()
+    def listar_eventos(
+        periodo: Annotated[str, Field(description=(
+            "Periodo tal como lo dice el usuario: 'hoy', 'manana', 'esta semana', "
+            "'la semana que viene', 'fin de semana', 'este mes', 'el mes que viene' "
+            "o un día ('viernes', '3 de noviembre')."))],
+    ) -> Annotated[CallToolResult, Resultado]:
+        """Consulta la agenda del usuario en un periodo: qué tiene hoy, mañana, esta semana, etc."""
+        return _a_mcp(servicio.listar(periodo))
+
+    @mcp.tool()
+    def cancelar_evento(
+        titulo: Annotated[str, Field(description="Palabra clave del título del evento, p. ej. 'dentista'.")] = "",
+        dia: Annotated[str, Field(description=DIA + " Vacío si el usuario no lo dice.")] = "",
+        id: Annotated[str, Field(description="Identificador del evento, solo si aparece en una respuesta anterior.")] = "",
+    ) -> Annotated[CallToolResult, Resultado]:
+        """Cancela un evento del calendario identificado por su título y, si se dice, su día. Si varios encajan, no cancela nada y pregunta cuál."""
+        return _a_mcp(servicio.cancelar(titulo, dia, id))
+
+    @mcp.tool()
+    def buscar_huecos(
+        dia: Annotated[str, Field(description=DIA)],
+        duracion_min: Annotated[Entero, Field(description="Duración en minutos (una hora = 60).")],
+    ) -> Annotated[CallToolResult, Resultado]:
+        """Busca tiempo libre en un día para una duración dada. Solo cuando el usuario pregunta explícitamente si tiene tiempo libre o un hueco."""
+        return _a_mcp(servicio.huecos(dia, duracion_min))
+
+    _registrar_rutas(mcp, servicio)
+    web.registrar_rutas(mcp, servicio)
+    return mcp
+
+
+# ── Rutas HTTP ────────────────────────────────────────────────────────────
+
+def _error(mensaje: str, estado: int) -> JSONResponse:
+    return JSONResponse({"error": mensaje}, status_code=estado)
+
+
+class TipoNoAdmitido(Exception):
+    """El cuerpo no es application/json (la API responde 415)."""
+
+
+def _es_json(request: Request) -> bool:
+    tipo = request.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+    return tipo == "application/json"
+
+
+def _sin_cuerpo_o_json(request: Request) -> None:
+    """Para POST sin cuerpo (cancelar, restaurar): se admite sin Content-Type,
+    pero un formulario o text/plain se rechaza (QA A-07)."""
+    if request.headers.get("content-type") and not _es_json(request):
+        raise TipoNoAdmitido()
+
+
+async def _json(request: Request) -> dict[str, Any]:
+    # Solo application/json (QA A-07): un formulario o un text/plain se pueden
+    # enviar desde otra web sin preflight CORS (CSRF); con JSON, el navegador
+    # tiene que pedir permiso antes y no se lo damos. Los formularios del
+    # frontend van a sus propias rutas /ui/... (web.py).
+    if not _es_json(request):
+        raise TipoNoAdmitido()
+    try:
+        cuerpo = await request.json()
+    except (json.JSONDecodeError, ValueError):
+        raise ErrorValidacion("El cuerpo tiene que ser JSON") from None
+    if not isinstance(cuerpo, dict):
+        raise ErrorValidacion("El cuerpo tiene que ser un objeto JSON")
+    return cuerpo
+
+
+def _api(funcion):
+    """Traduce las excepciones del dominio a respuestas HTTP."""
+    async def envoltura(request: Request) -> Response:
+        try:
+            return await funcion(request)
+        except ErrorValidacion as e:
+            return _error(str(e), 400)
+        except NoEncontrado:
+            return _error("Evento no encontrado", 404)
+        except TipoNoAdmitido:
+            return _error("El cuerpo tiene que ser JSON (Content-Type: application/json)", 415)
+    envoltura.__name__ = funcion.__name__
+    return envoltura
+
+
+def _registrar_rutas(mcp: MCPServer, servicio: Calendario) -> None:
+    @mcp.custom_route("/health", methods=["GET"])
+    async def health(_: Request) -> JSONResponse:
+        return JSONResponse({"modulo": NOMBRE, "version": VERSION, "estado": "ok"})
+
+    @mcp.custom_route("/calendario.ics", methods=["GET"])
+    async def calendario_ics(_: Request) -> Response:
+        cuerpo = ics.generar(servicio.listar_rango(), nombre="Mortimer",
+                             ahora=servicio.ahora(), zona=str(servicio.zona))
+        return Response(cuerpo, media_type="text/calendar; charset=utf-8",
+                        headers={"Content-Disposition": 'inline; filename="calendario.ics"'})
+
+    @mcp.custom_route("/api/eventos", methods=["GET", "POST"])
+    @_api
+    async def eventos(request: Request) -> Response:
+        if request.method == "GET":
+            q = request.query_params
+            lista = servicio.listar_rango(q.get("desde"), q.get("hasta"),
+                                          incluir_cancelados=a_bool(q.get("incluir_cancelados", "0")))
+            return JSONResponse(lista)
+        d = await _json(request)
+        r = servicio.alta_directa(d.get("titulo", ""), d.get("inicio"), d.get("fin"),
+                                  a_bool(d.get("todo_el_dia", False)), d.get("ubicacion") or "",
+                                  d.get("notas") or "", origen="usuario")
+        return JSONResponse(r, status_code=201)
+
+    @mcp.custom_route("/api/eventos/{id}", methods=["GET", "PATCH"])
+    @_api
+    async def evento(request: Request) -> Response:
+        id = request.path_params["id"]
+        if request.method == "GET":
+            return JSONResponse(servicio.obtener(id))
+        # editar(id, /, **campos): un "id" en el cuerpo acaba en 400 (QA A-05).
+        return JSONResponse(servicio.editar(id, **await _json(request)))
+
+    @mcp.custom_route("/api/eventos/{id}/cancelar", methods=["POST"])
+    @_api
+    async def cancelar(request: Request) -> Response:
+        _sin_cuerpo_o_json(request)
+        return JSONResponse({"evento": servicio.cancelar_por_id(request.path_params["id"])})
+
+    @mcp.custom_route("/api/eventos/{id}/restaurar", methods=["POST"])
+    @_api
+    async def restaurar(request: Request) -> Response:
+        _sin_cuerpo_o_json(request)
+        return JSONResponse({"evento": servicio.restaurar(request.path_params["id"])})
+
+    @mcp.custom_route("/api/reset", methods=["POST"])
+    @_api
+    async def reset(request: Request) -> Response:
+        # Se lee en cada petición: solo staging y la evaluación lo activan.
+        if os.environ.get("CALENDARIO_PERMITIR_RESET", "") != "1":
+            return _error("Reset deshabilitado (CALENDARIO_PERMITIR_RESET != 1)", 403)
+        d = await _json(request)
+        return JSONResponse({"eventos": servicio.reset(d.get("eventos", []))})
+
+
+# ── Aplicación ASGI ───────────────────────────────────────────────────────
+
+def _host_permitido(host: str | None, permitidos: list[str]) -> bool:
+    """Mismas reglas que TransportSecuritySettings del SDK de MCP ('nombre:*' = cualquier puerto)."""
+    if not host:
+        return False
+    if host in permitidos:
+        return True
+    return any(p.endswith(":*") and host.startswith(p[:-2] + ":") for p in permitidos)
+
+
+class FiltroHost:
+    """Protección contra DNS rebinding también para las rutas propias.
+
+    El SDK de MCP solo comprueba el Host en /mcp; aquí se aplica la misma
+    regla a /api, /ui y /calendario.ics, que también leen o cambian datos.
+    """
+
+    def __init__(self, app, permitidos: list[str]):
+        self.app = app
+        self.permitidos = permitidos
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] in ("http", "websocket"):
+            if not _host_permitido(Headers(scope=scope).get("host"), self.permitidos):
+                await PlainTextResponse("Invalid Host header", status_code=421)(scope, receive, send)
+                return
+        await self.app(scope, receive, send)
+
+
+def crear_app(mcp: MCPServer, hosts: str | None = None):
+    hosts = os.environ.get("ALLOWED_HOSTS", HOSTS_POR_DEFECTO) if hosts is None else hosts
+    permitidos = [h.strip() for h in hosts.split(",") if h.strip()]
+    app = mcp.streamable_http_app(
+        transport_security=TransportSecuritySettings(
+            enable_dns_rebinding_protection=True, allowed_hosts=permitidos,
+        ),
+    )
+    app.add_middleware(FiltroHost, permitidos=permitidos)
+    return app
+
+
+servicio = servicio_desde_entorno()
+mcp = crear_servidor(servicio)
+app = crear_app(mcp)
