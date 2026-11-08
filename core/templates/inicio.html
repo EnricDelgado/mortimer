@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block estilos %}
+    .resumen { display:flex; gap:12px; flex-wrap:wrap; margin:0 0 24px; }
+    .cifra { background:var(--superficie); border:1px solid var(--borde); border-radius:12px; padding:12px 16px; min-width:150px; }
+    .cifra b { display:block; font-size:22px; font-weight:650; }
+    .cifra span { color:var(--tenue); font-size:13px; }
+    .modulos { display:grid; grid-template-columns:repeat(auto-fill, minmax(320px, 1fr)); gap:16px; }
+    .modulo { background:var(--superficie); border:1px solid var(--borde); border-radius:12px; padding:16px; display:flex; flex-direction:column; gap:10px; }
+    .modulo.error { border-color:var(--error); }
+    .modulo .titulo { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+    .modulo .version { color:var(--tenue); font-size:13px; }
+    .modulo .desc { margin:0; color:var(--tenue); font-size:14px; white-space:pre-line;
+                    display:-webkit-box; -webkit-line-clamp:4; -webkit-box-orient:vertical; overflow:hidden; }
+    .modulo details summary { cursor:pointer; color:var(--tenue); font-size:13px; }
+    .herramientas { list-style:none; margin:8px 0 0; padding:0; display:flex; flex-direction:column; gap:8px; }
+    .herramientas li { border-left:2px solid var(--borde); padding-left:10px; }
+    .herramientas .nombre { font-weight:550; }
+    .herramientas .params { color:var(--tenue); }
+    .pie { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-top:auto; padding-top:6px;
+           border-top:1px solid var(--borde); font-size:13px; color:var(--tenue); flex-wrap:wrap; }
+    .pie .boton { font-size:13px; padding:4px 12px; }
+    .aviso { font-size:13px; color:var(--error); margin:0; word-break:break-word; }
+{% endblock %}
+{% block contenido %}
+<div class="cabecera">
+  <div>
+    <h1>Módulos</h1>
+    <p class="sub">Mortimer es un solo asistente. Cada módulo le añade conocimientos y herramientas, y tú le hablas siempre igual, desde el chat de cualquier página. Aquí ves qué módulos tiene instalados y qué sabe hacer con cada uno.</p>
+  </div>
+  <form class="enlinea" method="post" action="{{ raiz }}modulos/recargar">
+    <button class="boton" type="submit" title="Volver a descubrir los módulos sin reiniciar">Buscar módulos de nuevo</button>
+  </form>
+</div>
+
+{% set activos = modulos | selectattr('estado', 'equalto', 'ok') | list %}
+<div class="resumen">
+  <div class="cifra"><b>{{ activos | length }}{% if activos | length != modulos | length %} / {{ modulos | length }}{% endif %}</b><span>módulos activos</span></div>
+  <div class="cifra"><b>{{ n_herramientas }}</b><span>herramientas disponibles</span></div>
+  <div class="cifra"><b>{{ modulos | sum(attribute='uso.peticiones') }}</b><span>peticiones resueltas con módulos</span></div>
+</div>
+
+{% if modulos %}
+<div class="modulos">
+  {% for m in modulos %}
+  <article class="modulo {{ m.estado }}" id="modulo-{{ m.nombre }}">
+    <div class="titulo">
+      <h2>{{ m.nombre if m.estado == 'ok' else 'Módulo sin respuesta' }}</h2>
+      {% if m.version %}<span class="version">v{{ m.version }}</span>{% endif %}
+      <span class="chip {{ m.estado }}">{{ 'activo' if m.estado == 'ok' else 'caído' }}</span>
+    </div>
+    {% if m.estado == 'ok' %}
+      {% if m.descripcion %}<p class="desc">{{ m.descripcion }}</p>{% endif %}
+      <details {% if m.herramientas | length <= 3 %}open{% endif %}>
+        <summary>{{ m.herramientas | length }} herramienta{{ '' if m.herramientas | length == 1 else 's' }}</summary>
+        <ul class="herramientas">
+          {% for h in m.herramientas %}
+          <li><span class="nombre mono">{{ h.nombre }}</span>
+            {% if h.parametros %}<span class="params mono">({{ h.parametros | join(', ') }})</span>{% endif %}
+            {% if h.resumen %}<div class="tenue">{{ h.resumen }}</div>{% endif %}</li>
+          {% endfor %}
+        </ul>
+      </details>
+    {% else %}
+      <p class="aviso">No responde en <span class="mono">{{ m.nombre }}</span>. Mortimer sigue funcionando sin él; cuando vuelva, pulsa «Buscar módulos de nuevo».</p>
+      {% if m.error %}<details><summary>Detalle técnico</summary><p class="mono tenue">{{ m.error }}</p></details>{% endif %}
+    {% endif %}
+    <div class="pie">
+      <span>{% if m.uso.peticiones %}{{ m.uso.peticiones }} petici{{ 'ón' if m.uso.peticiones == 1 else 'ones' }} · última {{ m.uso.ultima | local }}{% else %}Sin usar todavía{% endif %}</span>
+      {% if m.frontend %}<a class="boton" href="{{ raiz }}m/{{ m.nombre | urlencode }}/ui">Abrir {{ m.nombre }}</a>{% endif %}
+    </div>
+  </article>
+  {% endfor %}
+</div>
+{% else %}
+<div class="vacio">
+  <p><b>No hay módulos instalados.</b></p>
+  <p>Mortimer puede conversar igualmente. Para añadir uno, ponlo en la variable <span class="mono">MODULOS</span> del core y pulsa «Buscar módulos de nuevo».</p>
+</div>
+{% endif %}
+{% endblock %}

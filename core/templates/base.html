@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block titulo %}Mortimer{% endblock %}</title>
+  <style>
+    :root { --fondo:#f7f6f3; --texto:#1f1f1c; --tenue:#6b6a64; --borde:#dedcd5; --acento:#2f5d50;
+            --superficie:#fff; --suave:#efede7; --ok:#2f7d4f; --error:#b5483b; }
+    @media (prefers-color-scheme: dark) {
+      :root { --fondo:#1b1b19; --texto:#ecebe6; --tenue:#9b9a93; --borde:#33332f; --acento:#7fb8a6;
+              --superficie:#252522; --suave:#2c2c29; --ok:#7cc79a; --error:#e08a7e; }
+    }
+    * { box-sizing: border-box; }
+    body { margin:0; background:var(--fondo); color:var(--texto); font:15px/1.5 system-ui, sans-serif; }
+    a { color:var(--acento); }
+    .barra { border-bottom:1px solid var(--borde); background:var(--superficie); }
+    .barra .dentro { max-width:1040px; margin:0 auto; padding:0 16px; display:flex; align-items:center; gap:24px; min-height:56px; flex-wrap:wrap; }
+    .marca { font-weight:650; font-size:17px; color:var(--texto); text-decoration:none; }
+    nav { display:flex; gap:4px; }
+    nav a { color:var(--tenue); text-decoration:none; padding:6px 12px; border-radius:8px; }
+    nav a:hover { background:var(--suave); color:var(--texto); }
+    nav a[aria-current=page] { background:var(--suave); color:var(--texto); font-weight:550; }
+    .estado-core { margin-left:auto; color:var(--tenue); font-size:13px; }
+    main { max-width:1040px; margin:0 auto; padding:28px 16px 120px; }
+    h1 { font-size:22px; margin:0 0 4px; }
+    h2 { font-size:16px; margin:0; }
+    .sub { color:var(--tenue); margin:0 0 24px; max-width:68ch; }
+    .cabecera { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; flex-wrap:wrap; }
+    .boton { font:inherit; font-size:14px; padding:7px 14px; border:1px solid var(--borde); border-radius:8px;
+             background:var(--superficie); color:var(--texto); cursor:pointer; text-decoration:none; display:inline-block; }
+    .boton:hover { background:var(--suave); }
+    .boton.principal { background:var(--acento); border-color:var(--acento); color:var(--fondo); }
+    .boton.peligro { color:var(--error); }
+    .boton.peligro:hover { border-color:var(--error); }
+    form.enlinea { display:inline; margin:0; }
+    .tenue { color:var(--tenue); }
+    .mono { font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:13px; }
+    .vacio { border:1px dashed var(--borde); border-radius:12px; padding:32px; text-align:center; color:var(--tenue); }
+    .chip { display:inline-block; font-size:12px; padding:1px 8px; border-radius:999px; border:1px solid var(--borde); color:var(--tenue); }
+    .chip.ok { color:var(--ok); border-color:currentColor; }
+    .chip.error { color:var(--error); border-color:currentColor; }
+    {% block estilos %}{% endblock %}
+  </style>
+</head>
+<body>
+<header class="barra">
+  <div class="dentro">
+    <a class="marca" href="{{ raiz or './' }}">Mortimer</a>
+    <nav>
+      <a href="{{ raiz or './' }}" {% if seccion == 'modulos' %}aria-current="page"{% endif %}>Módulos</a>
+      <a href="{{ raiz }}conversaciones" {% if seccion == 'conversaciones' %}aria-current="page"{% endif %}>Conversaciones</a>
+    </nav>
+    <span class="estado-core">modelo <b>{{ modelo }}</b></span>
+  </div>
+</header>
+<main>
+{% block contenido %}{% endblock %}
+</main>
+<script src="{{ raiz }}static/chat-flotante.js" data-core="{{ raiz }}"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

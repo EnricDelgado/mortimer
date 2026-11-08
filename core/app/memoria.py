@@ -51,6 +51,9 @@ class Memoria:
         self.ruta = ruta
         self._db = sqlite3.connect(ruta, check_same_thread=False)
         self._db.row_factory = sqlite3.Row
+        # Lo que se borra se sobrescribe con ceros: una conversación borrada no
+        # queda legible en las páginas libres del fichero.
+        self._db.execute("PRAGMA secure_delete = ON")
         self._db.executescript(ESQUEMA)
         self._migrar()
 
@@ -107,3 +110,69 @@ class Memoria:
             d["herramientas"] = json.loads(d["herramientas"])
             res.append(d)
         return res
+
+    # ── Registro de conversaciones (frontend del core) ────────────────────────
+    # Lo que ve el usuario sale de `interacciones`: guarda la petición tal cual
+    # la escribió (sin el sello de fecha) y las herramientas invocadas.
+
+    def conversaciones(self, limite: int = 200) -> list[dict[str, Any]]:
+        """Una fila por conversación, de la más reciente a la más antigua."""
+        filas = self._db.execute(
+            """
+            SELECT conversacion,
+                   COUNT(*)  AS turnos,
+                   MIN(fecha) AS inicio,
+                   MAX(fecha) AS ultima,
+                   MAX(id)   AS ultimo_id,
+                   (SELECT peticion FROM interacciones p
+                     WHERE p.conversacion = i.conversacion ORDER BY id LIMIT 1) AS primera,
+                   GROUP_CONCAT(DISTINCT canal) AS canales,
+                   SUM(CASE WHEN modulo IS NOT NULL THEN 1 ELSE 0 END) AS con_modulo
+              FROM interacciones i
+             GROUP BY conversacion
+             ORDER BY ultimo_id DESC
+             LIMIT ?
+            """,
+            (limite,),
+        ).fetchall()
+        return [dict(f) for f in filas]
+
+    def conversacion(self, conversacion: str) -> list[dict[str, Any]]:
+        """Los turnos de una conversación, en orden. Lista vacía si no existe."""
+        filas = self._db.execute(
+            "SELECT id, fecha, canal, peticion, respuesta, modulo, herramientas, t_total_ms, "
+            "error, truncada FROM interacciones WHERE conversacion=? ORDER BY id",
+            (conversacion,),
+        ).fetchall()
+        res = []
+        for f in filas:
+            d = dict(f)
+            d["herramientas"] = json.loads(d["herramientas"])
+            res.append(d)
+        return res
+
+    def borrar_conversacion(self, conversacion: str) -> int:
+        """Borra el historial y el registro de una conversación. Devuelve los turnos borrados.
+
+        Se borra también de `interacciones`: contiene el texto de las peticiones,
+        y el usuario tiene que poder eliminar lo que ha dicho (RNF de privacidad).
+        """
+        cur = self._db.execute("DELETE FROM interacciones WHERE conversacion=?", (conversacion,))
+        self._db.execute("DELETE FROM mensajes WHERE conversacion=?", (conversacion,))
+        self._db.commit()
+        return cur.rowcount
+
+    def borrar_todo(self) -> int:
+        """Borra todas las conversaciones y su registro. Devuelve los turnos borrados."""
+        cur = self._db.execute("DELETE FROM interacciones")
+        self._db.execute("DELETE FROM mensajes")
+        self._db.commit()
+        return cur.rowcount
+
+    def uso_modulos(self) -> dict[str, dict[str, Any]]:
+        """Por módulo: cuántas peticiones lo usaron y cuándo fue la última."""
+        filas = self._db.execute(
+            "SELECT modulo, COUNT(*) AS peticiones, MAX(fecha) AS ultima FROM interacciones "
+            "WHERE modulo IS NOT NULL GROUP BY modulo"
+        ).fetchall()
+        return {f["modulo"]: {"peticiones": f["peticiones"], "ultima": f["ultima"]} for f in filas}

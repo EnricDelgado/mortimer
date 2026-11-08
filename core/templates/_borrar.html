@@ -1,0 +1,23 @@
+<script>
+// Confirmación al borrar y aviso al chat flotante, que olvida la conversación
+// si es la que tenía abierta. Sin JavaScript, el formulario borra igual.
+(function () {
+  var actual = window.Mortimer ? window.Mortimer.conversacion() : null;
+  document.querySelectorAll("li[data-conversacion]").forEach(function (li) {
+    if (actual && li.dataset.conversacion === actual) {
+      li.classList.add("actual");
+      var e = li.querySelector(".etiqueta-actual");
+      if (e) e.hidden = false;
+    }
+  });
+  document.querySelectorAll("form.borrar").forEach(function (f) {
+    f.addEventListener("submit", function (ev) {
+      if (!confirm(f.dataset.confirmar)) { ev.preventDefault(); return; }
+      var c = f.dataset.conversacion;
+      if (window.Mortimer && (c === "*" || c === window.Mortimer.conversacion())) {
+        window.Mortimer.olvidar();
+      }
+    });
+  });
+})();
+</script>

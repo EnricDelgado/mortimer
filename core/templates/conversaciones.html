@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block titulo %}Conversaciones · Mortimer{% endblock %}
+{% block estilos %}
+    .lista { list-style:none; margin:0; padding:0; background:var(--superficie); border:1px solid var(--borde); border-radius:12px; }
+    .lista li { display:flex; align-items:center; gap:12px; padding:12px 16px; border-top:1px solid var(--borde); }
+    .lista li:first-child { border-top:0; }
+    .lista li.actual { background:var(--suave); }
+    .lista .texto { flex:1; min-width:0; }
+    .lista .texto a { color:var(--texto); text-decoration:none; font-weight:550; display:block;
+                      overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .lista .texto a:hover { text-decoration:underline; }
+    .lista .meta { color:var(--tenue); font-size:13px; }
+    .lista .boton { font-size:13px; padding:4px 10px; }
+{% endblock %}
+{% block contenido %}
+<div class="cabecera">
+  <div>
+    <h1>Conversaciones</h1>
+    <p class="sub">Todo lo que le has pedido a Mortimer, con las herramientas que usó para responderte. Puedes borrar una conversación o todas cuando quieras: se eliminan del historial y del registro, y Mortimer deja de recordarlas.</p>
+  </div>
+  {% if conversaciones %}
+  <form class="enlinea borrar" method="post" action="{{ raiz }}conversaciones/borrar"
+        data-confirmar="¿Borrar las {{ conversaciones | length }} conversaciones? No se puede deshacer." data-conversacion="*">
+    <button class="boton peligro" type="submit">Borrar todo</button>
+  </form>
+  {% endif %}
+</div>
+
+{% if conversaciones %}
+<ul class="lista">
+  {% for c in conversaciones %}
+  <li data-conversacion="{{ c.conversacion }}">
+    <div class="texto">
+      <a href="{{ raiz }}conversaciones/{{ c.conversacion | urlencode }}">{{ c.primera }}</a>
+      <div class="meta">{{ c.ultima | local }} · {{ c.turnos }} mensaje{{ '' if c.turnos == 1 else 's' }}{% if c.con_modulo %} · {{ c.con_modulo }} con módulos{% endif %}{% if c.canales and c.canales != 'web' %} · {{ c.canales | replace(',', ', ') }}{% endif %}<span class="etiqueta-actual" hidden> · abierta en el chat</span></div>
+    </div>
+    <form class="enlinea borrar" method="post" action="{{ raiz }}conversaciones/{{ c.conversacion | urlencode }}/borrar"
+          data-confirmar="¿Borrar esta conversación? No se puede deshacer." data-conversacion="{{ c.conversacion }}">
+      <button class="boton peligro" type="submit">Borrar</button>
+    </form>
+  </li>
+  {% endfor %}
+</ul>
+{% else %}
+<div class="vacio">
+  <p><b>No hay conversaciones guardadas.</b></p>
+  <p>Abre el chat con el botón de abajo a la derecha y pregúntale algo a Mortimer.</p>
+</div>
+{% endif %}
+{% endblock %}
+{% block scripts %}{% include "_borrar.html" %}{% endblock %}

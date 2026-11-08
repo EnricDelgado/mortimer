@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block titulo %}Conversación · Mortimer{% endblock %}
+{% block estilos %}
+    .volver { display:inline-block; margin-bottom:12px; font-size:14px; }
+    .turnos { display:flex; flex-direction:column; gap:20px; max-width:760px; }
+    .turno { display:flex; flex-direction:column; gap:6px; }
+    .cuando { color:var(--tenue); font-size:12px; text-align:center; }
+    .u, .a { padding:8px 12px; border-radius:12px; max-width:85%; white-space:pre-wrap; word-wrap:break-word; }
+    .u { align-self:flex-end; background:var(--acento); color:var(--fondo); }
+    .a { align-self:flex-start; background:var(--superficie); border:1px solid var(--borde); }
+    .a.fallo { border-color:var(--error); }
+    .traza { margin-top:6px; padding-top:6px; border-top:1px solid var(--borde); color:var(--tenue); }
+    .traza div { white-space:normal; }
+    .ko { color:var(--error); }
+{% endblock %}
+{% block contenido %}
+<a class="volver" href="{{ raiz }}conversaciones">← Todas las conversaciones</a>
+<div class="cabecera">
+  <div>
+    <h1>Conversación</h1>
+    <p class="sub">{{ turnos[0].fecha | local }} · {{ turnos | length }} mensaje{{ '' if turnos | length == 1 else 's' }} · <span class="mono">{{ conversacion[:8] }}</span></p>
+  </div>
+  <div>
+    <button class="boton principal" type="button" id="continuar" hidden>Continuar en el chat</button>
+    <form class="enlinea borrar" method="post" action="{{ raiz }}conversaciones/{{ conversacion | urlencode }}/borrar"
+          data-confirmar="¿Borrar esta conversación? No se puede deshacer." data-conversacion="{{ conversacion }}">
+      <button class="boton peligro" type="submit">Borrar</button>
+    </form>
+  </div>
+</div>
+
+<div class="turnos">
+  {% for t in turnos %}
+  <div class="turno">
+    <div class="cuando">{{ t.fecha | local }}{% if t.canal != 'web' %} · {{ t.canal }}{% endif %} · {{ (t.t_total_ms / 1000) | round(1) }} s</div>
+    <div class="u">{{ t.peticion }}</div>
+    <div class="a{% if t.error %} fallo{% endif %}">{{ t.respuesta }}{% if t.herramientas or t.error %}
+<div class="traza mono">{% for h in t.herramientas %}<div>→ {{ h.modulo or '?' }}.{{ h.herramienta }}({{ h.argumentos | tojson }}) <span class="{{ '' if h.ok else 'ko' }}">{{ 'ok' if h.ok else 'error' }}</span> · {{ h.ms }} ms</div>{% endfor %}{% if t.error %}<div class="ko">{{ t.error }}</div>{% endif %}</div>{% endif %}</div>
+  </div>
+  {% endfor %}
+</div>
+{% endblock %}
+{% block scripts %}
+{% include "_borrar.html" %}
+<script>
+(function () {
+  var b = document.getElementById("continuar");
+  if (!window.Mortimer) return;
+  b.hidden = false;
+  b.addEventListener("click", function () { window.Mortimer.continuar({{ conversacion | tojson }}); });
+})();
+</script>
+{% endblock %}

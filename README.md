@@ -28,7 +28,7 @@ ollama pull granite4.1:3b
 ./scripts/dev.sh
 ```
 
-Después abre <http://localhost:8000> y pregunta "¿qué hora es?". Debajo de la respuesta aparece la traza de la llamada: `→ prueba.dime_la_hora(...)`.
+Después abre <http://localhost:8000>, pulsa el botón **Mortimer** de abajo a la derecha y pregunta "¿qué hora es?". Debajo de la respuesta aparece la traza de la llamada: `prueba.dime_la_hora`.
 
 ## Estructura
 
@@ -39,15 +39,39 @@ Después abre <http://localhost:8000> y pregunta "¿qué hora es?". Debajo de la
 | `benchmarks/` | Comparativa de modelos locales en castellano |
 | `docs/arquitectura.md` | Decisiones técnicas fechadas |
 
+## Frontend del core
+
+Mortimer es un solo asistente y se le habla siempre igual: desde el **chat flotante** (botón abajo a la derecha), que es el mismo en las páginas del core y en los frontends de los módulos. La conversación abierta sigue al usuario al cambiar de página.
+
+| Página | Qué muestra |
+|---|---|
+| `/` | Mapa de módulos: estado, qué herramientas aporta cada uno, cuánto se ha usado y enlace a su frontend |
+| `/conversaciones` | Registro de conversaciones. Se puede borrar una o todas |
+| `/conversaciones/<id>` | Una conversación con las herramientas que invocó cada turno. "Continuar en el chat" la reabre |
+
+Para incluir el chat en el frontend de un módulo (ruta relativa a la raíz del core, por el proxy `/m/<modulo>/`):
+
+```html
+<script src="../../static/chat-flotante.js" data-core="../../"></script>
+```
+
+Tras cada respuesta emite el evento `mortimer:respuesta` en `document` (detalle = respuesta de `/api/chat`), para que la página refresque sus datos. Expone `window.Mortimer` con `abrir()`, `cerrar()`, `enviar(texto)`, `conversacion()`, `olvidar()` y `continuar(id)`.
+
+Borrar una conversación la elimina del historial que recibe el modelo **y** del registro de interacciones (contiene el texto de las peticiones). La base usa `secure_delete`, así que el texto no queda en el fichero.
+
 ## Endpoints del core
 
 | Método | Ruta | |
 |---|---|---|
-| GET | `/` | Chat web |
-| POST | `/api/chat` | `{"texto": "...", "conversacion": "opcional"}` |
+| POST | `/api/chat` | `{"texto": "...", "conversacion": "opcional", "canal": "api" \| "web" \| "telegram"}` |
+| GET | `/api/conversaciones` | Conversaciones: primera petición, número de turnos, fechas y canales |
+| GET | `/api/conversaciones/<id>` | Turnos de una conversación con sus herramientas (404 si no existe) |
+| DELETE | `/api/conversaciones/<id>` | Borra una conversación (historial y registro) |
+| DELETE | `/api/conversaciones` | Borra todas |
 | GET | `/api/modulos` | Módulos registrados y su estado |
 | POST | `/api/modulos/recargar` | Volver a descubrir módulos sin reiniciar |
 | GET | `/api/interacciones` | Registro de interacciones (datos de la evaluación) |
+| GET, POST… | `/m/<modulo>/<ruta>` | Proxy al frontend y la API REST de cada módulo |
 | GET | `/health` | Estado, modelo y herramientas disponibles |
 
 ## Configuración
