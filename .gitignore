@@ -154,3 +154,14 @@ desktop.ini
 # Temporales
 tmp/
 *.tmp
+
+# ── 4. Trabajo local que no se publica ────────────────────────────────────────
+# Notas, planes y entregas del TFM (vault de Obsidian), prototipos antiguos y
+# copias comprimidas. Viven fuera del repo; esto evita subirlos por error si
+# algún día se copian aquí. La documentación para el usuario va en Docs/.
+files/
+_old_approach/
+.obsidian/
+*.tgz
+*.tar.gz
+*.zip

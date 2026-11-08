@@ -1,7 +1,7 @@
 """Persistencia del módulo Calendario en SQLite.
 
 SQLite es la fuente de verdad; el .ics se genera a partir de ella (ics.py).
-Esquema de docs/arquitectura (§4) con dos cambios del Incremento 1:
+Esquema de Docs/arquitectura (§4) con dos cambios del Incremento 1:
   - columna `todo_el_dia` (0/1) para los eventos sin hora;
   - no se crea `calendarios_externos`: RF-07 pasa a trabajo futuro.
 

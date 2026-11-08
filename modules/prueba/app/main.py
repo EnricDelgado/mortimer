@@ -2,7 +2,7 @@
 
 Es el módulo mínimo que cumple el contrato: un servidor MCP con una
 herramienta, una página propia (/ui) y un /health. Sirve para comprobar el
-bucle completo del Incremento 0 y como plantilla para docs/crear-un-modulo.md.
+bucle completo del Incremento 0 y como plantilla para Docs/crear-un-modulo.md.
 """
 
 from __future__ import annotations

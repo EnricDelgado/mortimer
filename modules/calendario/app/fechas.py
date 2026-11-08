@@ -1,6 +1,6 @@
 """Resolución determinista de expresiones de fecha en castellano.
 
-Motivo (spike del 12/10/2026, docs/arquitectura.md DA-08): los modelos de 1,7-4B
+Motivo (spike del 12/10/2026, Docs/arquitectura.md DA-08): los modelos de 1,7-4B
 en CPU aciertan la hora casi siempre, pero fallan entre el 50 % y el 70 % de las
 fechas relativas ("el jueves", "el sábado"), porque eso exige aritmética de
 calendario. Se reparte el trabajo así: el modelo extrae la expresión, que es

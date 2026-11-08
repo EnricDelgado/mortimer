@@ -25,7 +25,7 @@ DIAS = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "doming
 # (sistema + esquemas de herramientas, cientos de tokens) es la parte más
 # lenta, y Ollama reutiliza la caché si el principio del prompt no cambia.
 # Por eso la fecha y la hora no van aquí sino al inicio de cada mensaje del
-# usuario (ver sellar()). Medido en benchmarks/ — ver docs/arquitectura.md DA-07.
+# usuario (ver sellar()). Medido en benchmarks/ — ver Docs/arquitectura.md DA-07.
 PROMPT_SISTEMA = """Eres Mortimer, un asistente personal que se ejecuta en el servidor doméstico del usuario.
 Responde siempre en castellano, de forma breve y directa: tres frases como máximo, salvo que el usuario pida más detalle.
 Cada mensaje del usuario empieza con la fecha y la hora en que lo envió, entre corchetes. Úsalas para interpretar expresiones como "mañana", "el jueves" o "esta semana".

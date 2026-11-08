@@ -172,6 +172,27 @@ Desarrollo en el Mac (`scripts/dev.sh`, Ollama nativo); despliegue y medición e
 - Las expresiones regulares son una lista cerrada: una frase que no encaje con `requiere` se queda sin herramienta. En la evaluación hay que contar estos falsos rechazos (llamada rechazada en un caso que la esperaba).
 - El prompt de sistema cambia (tres líneas): hay que repetir la regresión del benchmark (R4).
 
+## DA-16 · Un solo chat flotante y una pestaña «Registro» en cada módulo · 08/11/2026
+
+**Contexto.** En el Incremento 1 el core tenía su página de chat y el Calendario un enlace «Volver al chat». Para el usuario eran dos sitios distintos, y la tentación era que cada módulo acabase con su propio chat. Además, desde el frontend de un módulo no se veía qué había hecho Mortimer con sus datos: el registro de interacciones del core no incluye los cambios hechos a mano ni por la API.
+
+**Alternativas.**
+- A. Un chat por módulo, con su propio contexto.
+- B. Un único chat, servido por el core, que cada página incluye como widget flotante.
+- C. Para el registro: que el módulo lea el de interacciones del core.
+- D. Para el registro: que cada módulo anote lo que ejecuta en su propia tabla y enseñe, junto a ella, las peticiones del core filtradas por módulo.
+
+**Decisión.** B y D.
+- El chat es `core/app/static/chat-flotante.js`. La portada del core pasa a ser el mapa de módulos, y cada frontend de módulo incluye el widget con `data-core` apuntando a la raíz del core (`raiz + "../../"` tras el proxy `/m/<modulo>/`). El módulo no tiene chat propio. La conversación abierta sigue al usuario entre páginas.
+- El widget emite `mortimer:respuesta` tras cada respuesta y `mortimer:conversacion-borrada` al cambiar de conversación. La página del módulo escucha el primero y se refresca si la respuesta usó una de sus herramientas.
+- El Calendario añade la tabla `actividad` (canales `chat`, `manual` y `api`; estados `ok`, `pregunta` y `error`) y la pestaña «Registro». Las peticiones del usuario las lee el navegador de `GET /api/interacciones` del core: el módulo no guarda lo que dice el usuario.
+
+**Consecuencias.**
+- Mortimer es un solo asistente en todas las páginas, que es como se presenta en la memoria.
+- La tabla `interacciones` del core sigue siendo la única fuente de la evaluación. `actividad` es una ayuda para el usuario y para depurar.
+- El registro de actividad queda como parte **recomendada** del contrato de módulo, no obligatoria (`Docs/crear-un-modulo.md`, §4.8). Se revisará con el segundo módulo con datos (Vitácora).
+- Las capturas de la memoria hechas antes de este cambio muestran un chat provisional y hay que repetirlas.
+
 ## Pendiente
 
 - ~~Segunda ronda opcional~~: hecho en DEV-07 (DA-15).

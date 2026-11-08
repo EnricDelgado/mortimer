@@ -1,6 +1,6 @@
 # Módulo `prueba`
 
-El módulo más pequeño posible. Sirve para comprobar el bucle del core y como plantilla para módulos nuevos.
+El módulo más pequeño posible. Sirve para comprobar el bucle del core y como plantilla para módulos nuevos: ver [Crear un módulo](../../Docs/crear-un-modulo.md).
 
 | | |
 |---|---|
