@@ -26,6 +26,7 @@ Reglas que valen para todo el módulo:
 from __future__ import annotations
 
 import difflib
+import logging
 import re
 import uuid
 from datetime import date, datetime, time, timedelta, tzinfo
@@ -34,6 +35,8 @@ from zoneinfo import ZoneInfo
 
 from . import fechas
 from .db import BaseDatos
+
+log = logging.getLogger("calendario")
 
 DIAS = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
 MESES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto",
@@ -734,3 +737,34 @@ class Calendario:
         # Borrado y carga en una sola transacción (QA A-03).
         self.db.reemplazar(preparados)
         return len(preparados)
+
+    # ── Registro de actividad (pestaña «Registro» del frontend) ─────────────
+
+    def anotar(self, canal: str, operacion: str, argumentos: dict[str, Any], resultado: str,
+               estado: str = "ok", evento_id: str | None = None, ms: float | None = None) -> None:
+        """Guarda una entrada del registro. Nunca hace fallar la operación anotada."""
+        try:
+            # Hora real, no self.ahora(): con MORTIMER_AHORA el registro sigue
+            # diciendo cuándo pasó de verdad.
+            fecha = datetime.now(self.zona).isoformat(timespec="seconds")
+            self.db.registrar_actividad(fecha, canal, operacion, argumentos, resultado, estado,
+                                        evento_id, None if ms is None else round(ms, 1))
+        except Exception:  # pragma: no cover - el registro es secundario
+            log.exception("No se pudo anotar %s en el registro", operacion)
+
+    @staticmethod
+    def estado_de(r: dict[str, Any]) -> tuple[str, str | None]:
+        """(estado, id del evento) de un resultado de herramienta {"texto","final","datos"}.
+
+        'ok' si la herramienta hizo lo que se le pedía; 'pregunta' si no tocó
+        nada y devolvió una pregunta (falta un dato, varios candidatos, fecha
+        que no entiende).
+        """
+        datos = r.get("datos") or {}
+        for clave in ("evento", "movido", "cancelado"):
+            ev = datos.get(clave)
+            if isinstance(ev, dict) and ev.get("id"):
+                return "ok", ev["id"]
+        if "error" in datos or "candidatos" in datos or any(k in datos for k in ("movido", "cancelado")):
+            return "pregunta", None
+        return "ok", None

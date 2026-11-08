@@ -3,9 +3,12 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Calendario · Mortimer</title>
+  <title>{{ 'Registro' if pestana == 'registro' else 'Calendario' }} · Mortimer</title>
   {# Rutas relativas: el módulo se sirve tras el proxy del core (/m/calendario/). #}
   <script src="{{ raiz }}ui/static/htmx.min.js" defer></script>
+  {# Chat flotante de Mortimer: es del core, no del módulo. Si el módulo se abre
+     sin el core delante (puerto propio), el fichero no existe y no aparece. #}
+  <script src="{{ raiz }}../../static/chat-flotante.js" data-core="{{ raiz }}../../" defer></script>
   <style>
     :root {
       --fondo:#f7f6f3; --superficie:#fff; --texto:#1f1f1c; --tenue:#6b6a64; --borde:#dedcd5;
@@ -153,19 +156,61 @@
     .suscribir ol { margin:6px 0; padding-left:22px; }
     .suscribir li { margin-bottom:4px; }
     .nota { font-size:13px; color:var(--tenue); }
+
+    /* Pestañas */
+    .pestanas { display:flex; gap:4px; }
+    .pestanas a { padding:6px 12px; border-radius:8px; text-decoration:none; color:var(--tenue); min-height:36px; display:inline-flex; align-items:center; }
+    .pestanas a.actual { background:var(--acento-suave); color:var(--texto); font-weight:600; }
+
+    /* Registro */
+    .intro { margin:-6px 0 14px; }
+    .bloque { margin-top:16px; background:var(--superficie); border:1px solid var(--borde); border-radius:12px; padding:12px 14px; }
+    .bloque-cabecera { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:6px; }
+    .pequeno { min-height:32px; padding:4px 10px; font-size:14px; }
+    .filtros { display:flex; gap:6px; flex-wrap:wrap; margin:8px 0 12px; }
+    .filtro { padding:4px 10px; border:1px solid var(--borde); border-radius:999px; text-decoration:none; color:var(--acento); font-size:14px; }
+    .filtro.actual { background:var(--acento-suave); color:var(--texto); border-color:var(--acento); font-weight:600; }
+    .registro { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:8px; }
+    .entrada { border-left:3px solid var(--acento); background:var(--fondo); border-radius:6px; padding:8px 10px; display:flex; flex-direction:column; gap:4px; min-width:0; }
+    .entrada.pregunta { border-left-color:var(--aviso); }
+    .entrada.error { border-left-color:var(--error); }
+    .entrada-cabecera { display:flex; flex-wrap:wrap; align-items:baseline; gap:4px 8px; }
+    .entrada time { font-size:13px; color:var(--tenue); font-variant-numeric:tabular-nums; }
+    .entrada .dia-reg::first-letter { text-transform:uppercase; }
+    .entrada .dia-reg { display:inline-block; }
+    .operacion { font-weight:600; }
+    .ms { font-size:12px; color:var(--tenue); margin-left:auto; font-variant-numeric:tabular-nums; }
+    .canal-chat { border-color:var(--acento); color:var(--acento); }
+    .estado-pregunta { border-color:var(--aviso); color:var(--aviso); }
+    .estado-error { border-color:var(--error); color:var(--error); }
+    .llamada { font-family:ui-monospace, monospace; font-size:13px; color:var(--tenue); overflow-wrap:anywhere; }
+    .resultado, .campos-registro, .peticion, .respuesta { margin:0; font-size:14px; white-space:pre-wrap; overflow-wrap:anywhere; }
+    .campos-registro { color:var(--tenue); }
+    .peticion { font-weight:600; }
+    .ver { font-size:13px; }
+    .pie-registro { margin-top:10px; }
+    .vaciar { margin-top:14px; display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
   </style>
 </head>
 <body>
 <header class="barra">
   <div class="contenedor">
-    <a class="marca" href="{{ raiz }}../../">Mortimer <span>· Calendario</span></a>
-    <a href="{{ raiz }}../../">Volver al chat</a>
+    <a class="marca" href="{{ raiz }}../../" title="Ir a la portada de Mortimer">Mortimer <span>· Calendario</span></a>
+    <nav class="pestanas" aria-label="Secciones del calendario">
+      <a href="{{ raiz }}ui"{% if pestana != 'registro' %} class="actual" aria-current="page"{% endif %}>Calendario</a>
+      <a href="{{ raiz }}ui/registro"{% if pestana == 'registro' %} class="actual" aria-current="page"{% endif %}>Registro</a>
+    </nav>
   </div>
 </header>
 <main class="contenedor">
 <div id="vista">
+{% if pestana == 'registro' %}
+{% include "_registro.html" %}
+{% else %}
 {% include "_vista.html" %}
+{% endif %}
 </div>
+{% if pestana != 'registro' %}
 <section class="suscribir" aria-labelledby="t-suscribir">
   <h2 id="t-suscribir">Ver el calendario en el móvil</h2>
   <p>Puedes suscribirte a este calendario desde la app de calendario del móvil. Lo verás junto a tus otros calendarios y se actualizará solo, cada cierto tiempo (no al instante). Es de solo lectura: los cambios se hacen aquí o en el chat.</p>
@@ -194,6 +239,7 @@
     <p class="nota">No uses «Añadir calendario desde URL» de la web de Google Calendar: lo descargan los servidores de Google, que no llegan a tu servidor de casa. ICSx⁵ lo descarga desde el propio móvil.</p>
   </details>
 </section>
+{% endif %}
 </main>
 <script>
   // Alta rápida desde el «+» de cada día: abre el formulario con esa fecha.
@@ -220,6 +266,94 @@
     boton.textContent = hecho ? 'Copiada' : 'Cópiala a mano';
   }
   document.addEventListener('DOMContentLoaded', rellenarIcs);
+
+  // ── Registro: peticiones a Mortimer que usaron el calendario ──
+  // Se leen del core (GET /api/interacciones) desde el navegador: el módulo no
+  // conoce el core ni guarda lo que dice el usuario.
+  function el(tag, clase, texto) {
+    var e = document.createElement(tag);
+    if (clase) e.className = clase;
+    if (texto != null) e.textContent = texto;
+    return e;
+  }
+  function horaCorta(iso) {
+    var d = new Date(iso);
+    if (isNaN(d)) return iso;
+    var hoy = new Date(), ayer = new Date(); ayer.setDate(hoy.getDate() - 1);
+    var dia = d.toDateString() === hoy.toDateString() ? 'hoy'
+            : d.toDateString() === ayer.toDateString() ? 'ayer'
+            : d.toLocaleDateString('es-ES', {weekday: 'short', day: 'numeric', month: 'short'});
+    return dia + ' ' + d.toLocaleTimeString('es-ES', {hour: '2-digit', minute: '2-digit', second: '2-digit'});
+  }
+  function cargarPeticiones() {
+    var caja = document.getElementById('peticiones');
+    if (!caja) return;
+    var modulo = caja.dataset.modulo;
+    fetch(caja.dataset.core + 'api/interacciones?limite=200', {headers: {'Accept': 'application/json'}})
+      .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); })
+      .then(function (lista) {
+        var propias = lista.filter(function (i) {
+          return (i.herramientas || []).some(function (h) { return h.modulo === modulo; });
+        });
+        caja.textContent = '';
+        if (!propias.length) {
+          caja.appendChild(el('p', 'vacio', 'Todavía no le has pedido nada del calendario a Mortimer.'));
+          return;
+        }
+        var ol = el('ol', 'registro');
+        propias.forEach(function (i) {
+          var li = el('li', 'entrada' + (i.error ? ' error' : ''));
+          var cab = el('div', 'entrada-cabecera');
+          var t = el('time', null, horaCorta(i.fecha)); t.dateTime = i.fecha; cab.appendChild(t);
+          cab.appendChild(el('span', 'chip canal-chat', i.canal === 'telegram' ? 'Telegram' : 'Chat'));
+          if (i.error) cab.appendChild(el('span', 'chip estado-error', 'error'));
+          if (i.t_total_ms != null) cab.appendChild(el('span', 'ms', (i.t_total_ms / 1000).toFixed(1) + ' s'));
+          li.appendChild(cab);
+          li.appendChild(el('p', 'peticion', '«' + i.peticion + '»'));
+          i.herramientas.forEach(function (h) {
+            var args = Object.keys(h.argumentos || {}).filter(function (k) {
+              var v = h.argumentos[k]; return v !== '' && v != null;
+            }).map(function (k) { return k + '=' + JSON.stringify(h.argumentos[k]); }).join(', ');
+            li.appendChild(el('code', 'llamada', '→ ' + h.modulo + '.' + h.herramienta + '(' + args + ') '
+                              + (h.ok ? 'ok' : 'error') + ' · ' + Math.round(h.ms) + ' ms'));
+          });
+          if (i.respuesta) li.appendChild(el('p', 'respuesta', i.respuesta));
+          ol.appendChild(li);
+        });
+        caja.appendChild(ol);
+      })
+      .catch(function () {
+        caja.textContent = '';
+        caja.appendChild(el('p', 'vacio', 'No puedo leer las peticiones: abre el calendario desde Mortimer '
+                                          + '(/m/calendario/ui) para verlas.'));
+      });
+  }
+  document.addEventListener('DOMContentLoaded', cargarPeticiones);
+  document.addEventListener('htmx:afterSwap', function (e) {
+    if (e.detail.target && e.detail.target.id === 'vista') cargarPeticiones();
+  });
+
+  // ── Chat flotante: si Mortimer ha tocado el calendario, se recarga la vista ──
+  function recargarVista() {
+    if (!window.htmx || !document.getElementById('vista')) { window.location.reload(); return; }
+    // Se vuelve a pedir la semana o el mes que se está viendo, que puede no ser
+    // el de la URL (tras un alta, la vista salta a la semana del evento).
+    var url = window.location.pathname + window.location.search;
+    var volver = document.querySelector('#vista input[name=volver]');
+    var raiz = document.querySelector('#vista input[name=raiz]');
+    if (volver && raiz) {
+      var partes = volver.value.split(':');
+      if (partes[0] === 'semana') url = raiz.value + 'ui?semana=' + encodeURIComponent(partes[1]);
+      else if (partes[0] === 'mes') url = raiz.value + 'ui/mes?mes=' + encodeURIComponent(partes[1]);
+    }
+    htmx.ajax('GET', url, {target: '#vista', swap: 'innerHTML'});
+  }
+  document.addEventListener('mortimer:respuesta', function (e) {
+    var r = e.detail || {};
+    var usado = (r.herramientas || []).some(function (h) { return h.modulo === 'calendario'; });
+    if (usado) recargarVista();
+  });
+  document.addEventListener('mortimer:conversacion-borrada', cargarPeticiones);
 </script>
 </body>
 </html>

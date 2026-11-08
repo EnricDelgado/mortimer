@@ -1,7 +1,14 @@
 """Frontend del módulo Calendario (RF-11, Lote B: DEV-15 y DEV-16).
 
 Vistas de semana (/ui) y de mes (/ui/mes), alta, edición, cancelación y
-restauración manuales, y el bloque "Suscribirse" con la URL del .ics.
+restauración manuales, el bloque "Suscribirse" con la URL del .ics y la
+pestaña «Registro» (/ui/registro): las llamadas a herramientas que ha hecho
+Mortimer y los cambios hechos a mano, más las peticiones del usuario que las
+provocaron (estas se leen del core desde el navegador).
+
+El chat no es del módulo: la página incluye el chat flotante del core
+(static/chat-flotante.js), que habla con Mortimer. Cuando Mortimer usa el
+calendario, la página vuelve a pedir #vista para enseñar el cambio.
 Jinja2 + htmx servido por el propio módulo (sin CDN, DA-04).
 
 Reglas de este fichero:
@@ -24,6 +31,7 @@ Se conserva la firma `registrar_rutas(mcp, servicio)`, a la que llama main.py.
 
 from __future__ import annotations
 
+import json
 import re
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -239,6 +247,100 @@ def contexto_mes(servicio: Calendario, anio: int, mes: int, raiz: str = "",
     return ctx
 
 
+# ── Registro de actividad ─────────────────────────────────────────────────
+
+LIMITE_REGISTRO = 50
+CANALES = {"chat": "Mortimer", "manual": "A mano", "api": "API"}
+OPERACIONES = {
+    "crear_evento": "Crear evento", "listar_eventos": "Consultar la agenda",
+    "cancelar_evento": "Cancelar evento", "editar_evento": "Cambiar evento",
+    "buscar_huecos": "Buscar huecos", "alta": "Alta", "editar": "Edición",
+    "cancelar": "Cancelación", "restaurar": "Restauración", "reset": "Reinicio del calendario",
+}
+_CAMPOS_LEGIBLES = {"titulo": "título", "fecha": "fecha", "hora": "desde", "hora_fin": "hasta",
+                    "todo_el_dia": "todo el día", "ubicacion": "lugar", "notas": "notas",
+                    "inicio": "inicio", "fin": "fin", "id": "id", "eventos": "eventos"}
+
+
+def _llamada(operacion: str, argumentos: dict[str, Any]) -> str:
+    """'crear_evento(titulo="Taller", dia="viernes")', sin los argumentos vacíos."""
+    partes = [f"{k}={json.dumps(v, ensure_ascii=False)}" for k, v in argumentos.items()
+              if v not in ("", None)]
+    return f"{operacion}({', '.join(partes)})"
+
+
+def _resumen_campos(argumentos: dict[str, Any]) -> str:
+    partes = []
+    for k, v in argumentos.items():
+        if v in ("", None):
+            continue
+        if k == "todo_el_dia":
+            if a_bool(v):
+                partes.append("todo el día")
+            continue
+        partes.append(f"{_CAMPOS_LEGIBLES.get(k, k)}: {v}")
+    return " · ".join(partes)
+
+
+def _hora_registro(fecha: str, hoy: date) -> tuple[str, str]:
+    """('hoy', '10:21:03') o ('dom 8 nov', '10:21:03')."""
+    try:
+        dt = datetime.fromisoformat(fecha)
+    except ValueError:
+        return "", fecha
+    if dt.date() == hoy:
+        dia = "hoy"
+    elif dt.date() == hoy - timedelta(days=1):
+        dia = "ayer"
+    else:
+        dia = f"{DIAS_CORTOS[dt.weekday()]} {dt.day} {MESES[dt.month - 1][:3]}"
+        if dt.year != hoy.year:
+            dia += f" {dt.year}"
+    return dia, f"{dt:%H:%M:%S}"
+
+
+def contexto_registro(servicio: Calendario, raiz: str = "", canal: str | None = None,
+                      antes_de: int | None = None, aviso: dict[str, str] | None = None) -> dict[str, Any]:
+    canal = canal if canal in CANALES else None
+    filas = servicio.db.actividad(canal, LIMITE_REGISTRO + 1, antes_de)
+    hay_mas = len(filas) > LIMITE_REGISTRO
+    filas = filas[:LIMITE_REGISTRO]
+    eventos = {e["id"]: e for e in servicio.listar_rango(incluir_cancelados=True)}
+    hoy = datetime.now(servicio.zona).date()
+    entradas = []
+    for f in filas:
+        dia, hora = _hora_registro(f["fecha"], hoy)
+        ev = eventos.get(f["evento_id"] or "")
+        enlace = None
+        if ev:
+            fecha_ev = servicio._inicio(ev).date().isoformat()
+            enlace = {"href": f"ui?semana={fecha_ev}#d-{fecha_ev}", "titulo": ev["titulo"],
+                      "cancelado": bool(ev["cancelado_en"])}
+        entradas.append({
+            "id": f["id"], "dia": dia, "hora": hora, "fecha": f["fecha"],
+            "canal": f["canal"], "canal_etiqueta": CANALES.get(f["canal"], f["canal"]),
+            "operacion": f["operacion"], "etiqueta": OPERACIONES.get(f["operacion"], f["operacion"]),
+            "llamada": _llamada(f["operacion"], f["argumentos"]) if f["canal"] == "chat" else "",
+            "campos": _resumen_campos(f["argumentos"]) if f["canal"] != "chat" else "",
+            "resultado": f["resultado"] or "", "estado": f["estado"],
+            "ms": f["ms"], "enlace": enlace,
+        })
+    cuentas = servicio.db.contar_actividad()
+    return {
+        "raiz": raiz,
+        "pestana": "registro",
+        "aviso": aviso,
+        "canal": canal or "",
+        "filtros": [{"valor": "", "etiqueta": "Todo", "n": sum(cuentas.values())}] + [
+            {"valor": c, "etiqueta": e, "n": cuentas.get(c, 0)} for c, e in CANALES.items()],
+        "entradas": entradas,
+        "siguiente": (f"ui/registro?{'canal=' + canal + '&' if canal else ''}antes={filas[-1]['id']}"
+                      if hay_mas and filas else None),
+        "paginado": antes_de is not None,
+        "volver_registro": f"ui/registro{'?canal=' + canal if canal else ''}",
+    }
+
+
 # ── Parámetros y formularios ──────────────────────────────────────────────
 
 def _fecha_o_none(valor: str | None) -> date | None:
@@ -311,6 +413,11 @@ def registrar_rutas(mcp, servicio: Calendario) -> None:
             return contexto_mes(servicio, *am, raiz=raiz, aviso=aviso, alta=alta)
         return contexto_semana(servicio, ref or _fecha_o_none(valor) or hoy, raiz=raiz, aviso=aviso, alta=alta)
 
+    def anotar(operacion: str, f: dict[str, str], texto: str, estado: str = "ok",
+               evento_id: str | None = None) -> None:
+        args = {k: v for k, v in f.items() if k not in ("raiz", "volver") and v != ""}
+        servicio.anotar("manual", operacion, args, texto, estado, evento_id)
+
     async def formulario(request: Request) -> tuple[dict[str, str], str]:
         f = {k: str(v) for k, v in (await request.form()).items()}
         raiz = f.get("raiz", "")
@@ -357,9 +464,11 @@ def registrar_rutas(mcp, servicio: Calendario) -> None:
         try:
             r = servicio.alta_directa(origen="usuario", **_evento_desde_formulario(f))
         except ErrorValidacion as e:
+            anotar("alta", f, f"No he podido añadirlo: {e}.", "error")
             return error(request, f, raiz, f"No he podido añadirlo: {e}.", alta=f)
         ev = r["evento"]
         texto = f"Añadido: {_describir(servicio, ev)}." + _aviso_solapes(servicio, r["solapamientos"])
+        anotar("alta", f, texto, evento_id=ev["id"])
         return pintar(request, vista(f.get("volver", ""), raiz, ref=servicio._inicio(ev).date(),
                                      aviso={"tipo": "atencion" if r["solapamientos"] else "ok", "texto": texto}))
 
@@ -377,11 +486,14 @@ def registrar_rutas(mcp, servicio: Calendario) -> None:
                     campos["fin"] = (date.fromisoformat(campos["inicio"]) + timedelta(days=dias)).isoformat()
             r = servicio.editar(id, **campos)
         except NoEncontrado:
+            anotar("editar", f, "Ese evento ya no existe.", "error", id)
             return error(request, f, raiz, "Ese evento ya no existe.")
         except ErrorValidacion as e:
+            anotar("editar", f, f"No he podido guardar los cambios: {e}.", "error", id)
             return error(request, f, raiz, f"No he podido guardar los cambios: {e}.")
         ev = r["evento"]
         texto = f"Guardado: {_describir(servicio, ev)}." + _aviso_solapes(servicio, r["solapamientos"])
+        anotar("editar", f, texto, evento_id=id)
         return pintar(request, vista(f.get("volver", ""), raiz, ref=servicio._inicio(ev).date(),
                                      aviso={"tipo": "atencion" if r["solapamientos"] else "ok", "texto": texto}))
 
@@ -393,6 +505,7 @@ def registrar_rutas(mcp, servicio: Calendario) -> None:
         except NoEncontrado:
             return error(request, f, raiz, "Ese evento ya no existe.")
         texto = f"Cancelado: {_describir(servicio, ev)}. Puedes restaurarlo en «Cancelados»."
+        anotar("cancelar", {}, texto, evento_id=ev["id"])
         ctx = vista(f.get("volver", ""), raiz, aviso={"tipo": "ok", "texto": texto})
         ctx["abrir_cancelados"] = True
         return pintar(request, ctx)
@@ -405,4 +518,28 @@ def registrar_rutas(mcp, servicio: Calendario) -> None:
         except NoEncontrado:
             return error(request, f, raiz, "Ese evento ya no existe.")
         texto = f"Restaurado: {_describir(servicio, ev)}." + _aviso_solapes(servicio, servicio._solapamientos(ev))
+        anotar("restaurar", {}, texto, evento_id=ev["id"])
         return pintar(request, vista(f.get("volver", ""), raiz, aviso={"tipo": "ok", "texto": texto}))
+
+    @mcp.custom_route("/ui/registro", methods=["GET"])
+    async def ui_registro(request: Request) -> HTMLResponse:
+        q = request.query_params
+        try:
+            antes = int(q["antes"]) if q.get("antes") else None
+        except ValueError:
+            antes = None
+        ctx = contexto_registro(servicio, raiz_desde_ruta(request.url.path), q.get("canal"), antes)
+        return pintar_registro(request, ctx)
+
+    @mcp.custom_route("/ui/registro/vaciar", methods=["POST"])
+    async def ui_vaciar_registro(request: Request) -> HTMLResponse:
+        _, raiz = await formulario(request)
+        n = servicio.db.vaciar_actividad()
+        aviso = {"tipo": "ok", "texto": f"Registro vaciado ({n} entrada{'' if n == 1 else 's'}). "
+                                        "Los eventos no se han tocado."}
+        return pintar_registro(request, contexto_registro(servicio, raiz, aviso=aviso))
+
+    def pintar_registro(request: Request, ctx: dict[str, Any]) -> HTMLResponse:
+        parcial = request.headers.get("hx-request") == "true"
+        plantilla = entorno.get_template("_registro.html" if parcial else "pagina.html")
+        return HTMLResponse(plantilla.render(**ctx))

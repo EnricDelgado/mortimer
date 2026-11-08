@@ -38,7 +38,9 @@ Ejemplos de frases (propias, no son las del banco de evaluación):
 
 ## Frontend
 
-Página web del módulo, en castellano y pensada para el móvil. Se abre desde el chat (enlace del módulo en la cabecera) o directamente en `http://<servidor>:<puerto del core>/m/calendario/ui`.
+Página web del módulo, en castellano y pensada para el móvil. Sirve para **gestionar la información** del calendario; para hablar con Mortimer, la página incluye el chat flotante del core, el mismo que en el resto de Mortimer (el módulo no tiene chat propio). Se abre desde el mapa de módulos de Mortimer o directamente en `http://<servidor>:<puerto del core>/m/calendario/ui`.
+
+Dos pestañas: **Calendario** y **Registro**.
 
 - **Semana** (`/ui`, `/ui?semana=AAAA-MM-DD`): los siete días de lunes a domingo, en lista en el móvil y en columnas en pantallas anchas. Botones ‹ Hoy › para moverse.
 - **Mes** (`/ui/mes`, `/ui/mes?mes=AAAA-MM`): rejilla del mes; en el móvil cada día muestra puntos y, al pulsarlo, abre su semana.
@@ -47,6 +49,10 @@ Página web del módulo, en castellano y pensada para el móvil. Se abre desde e
 - **Cancelados**: lista con botón «Restaurar» (cancelar nunca borra).
 - **Ver el calendario en el móvil**: dirección del `.ics` para copiar e instrucciones para iPhone y Android.
 - Los eventos creados desde el chat llevan la marca «vía chat».
+- **Chat flotante**: `../../static/chat-flotante.js` del core, con `data-core` apuntando a la raíz del core. Cuando una respuesta de Mortimer ha usado el calendario (evento `mortimer:respuesta`), la página vuelve a pedir la semana o el mes que se está viendo, así que el cambio aparece sin recargar. Si el módulo se abre sin el core delante (su propio puerto), el chat no aparece y el resto funciona igual.
+- **Registro** (`/ui/registro`): dos bloques.
+  - *Peticiones a Mortimer*: lo que el usuario pidió en el chat (o por Telegram) y acabó usando el calendario, con las llamadas, la respuesta y el tiempo total. El navegador lo lee del core (`GET /api/interacciones`) y filtra las del módulo `calendario`; el módulo no guarda lo que dice el usuario.
+  - *Llamadas y cambios en el calendario*: todo lo que ha ejecutado el módulo, de lo más reciente a lo más antiguo. Cada llamada a una herramienta (origen «Mortimer», con sus argumentos tal cual llegaron y la frase devuelta) y cada cambio hecho a mano o por la API. Las llamadas que no tocaron nada y devolvieron una pregunta (varios candidatos, falta un dato) se marcan «preguntó». Filtro por origen, 50 por página y enlace al evento en su semana. «Vaciar este registro» borra solo esta lista, nunca eventos.
 
 Detalles técnicos: Jinja2 (`templates/`) y htmx servido por el propio módulo (`app/static/htmx.min.js`, sin CDN, DA-04). Todas las URL del HTML son **relativas**, porque el usuario llega a través del proxy del core (`/m/calendario/...`); cada plantilla recibe `raiz`, el prefijo que lleva a la raíz del módulo desde la página actual. Los formularios funcionan también sin JavaScript.
 
@@ -64,8 +70,8 @@ Todas en el puerto 8001. Solo aceptan peticiones con un `Host` de `ALLOWED_HOSTS
 | `GET /api/eventos/{id}` · `PATCH /api/eventos/{id}` | Consulta y edición |
 | `POST /api/eventos/{id}/cancelar` · `POST /api/eventos/{id}/restaurar` | Borrado lógico y restauración |
 | `POST /api/reset` | Vacía la base y carga `{"eventos": [...]}` en una sola transacción. Solo con `CALENDARIO_PERMITIR_RESET=1`; si no, 403. Ids repetidos → 400 |
-| `GET /ui`, `GET /ui/mes` | Frontend |
-| `POST /ui/eventos`, `POST /ui/eventos/{id}`, `POST /ui/eventos/{id}/cancelar`, `POST /ui/eventos/{id}/restaurar` | Formularios del frontend (devuelven HTML) |
+| `GET /ui`, `GET /ui/mes`, `GET /ui/registro?canal=chat\|manual\|api&antes=<id>` | Frontend |
+| `POST /ui/eventos`, `POST /ui/eventos/{id}`, `POST /ui/eventos/{id}/cancelar`, `POST /ui/eventos/{id}/restaurar`, `POST /ui/registro/vaciar` | Formularios del frontend (devuelven HTML) |
 | `GET /ui/static/htmx.min.js` | htmx |
 
 Los `POST` y `PATCH` de `/api/...` exigen `Content-Type: application/json` (si no, 415: evita CSRF con formularios o `text/plain`); `cancelar` y `restaurar` también se aceptan sin cuerpo. `todo_el_dia` admite booleano o texto (`"true"`, `"1"`, `"on"`, `"sí"`; el resto es falso). Un `PATCH` con `id` en el cuerpo → 400.
@@ -87,7 +93,10 @@ Formato de un evento: `id` (UUID, también UID del `.ics`), `titulo`, `inicio` y
 
 Todo está en un único fichero SQLite, `DATA_DIR/calendario.db` (modo WAL, así que junto a él pueden aparecer `calendario.db-wal` y `calendario.db-shm`). En el servidor, con el `docker-compose.yml` de producción, es `${DATA_LOCAL:-./data}/calendario/calendario.db`. Igual que la base del core, debe estar en disco local y no en una carpeta del NAS montada por red.
 
-Una tabla, `eventos`, con una fila por evento. Cancelar no borra la fila: rellena `cancelado_en`.
+Dos tablas:
+
+- `eventos`, con una fila por evento. Cancelar no borra la fila: rellena `cancelado_en`.
+- `actividad`, el registro de la pestaña «Registro»: `fecha` (hora real, aunque haya `MORTIMER_AHORA`), `canal` (`chat`, `manual` o `api`), `operacion`, `argumentos` (JSON), `resultado`, `estado` (`ok`, `pregunta` o `error`), `evento_id` y `ms`. Las consultas (`GET`) no se anotan. No es la fuente de la evaluación: esa es la tabla `interacciones` del core.
 
 Leer los datos sin Mortimer:
 
@@ -126,7 +135,7 @@ Para que el core lo descubra en local: `MODULOS=http://localhost:8001,http://loc
 
 ## Guion manual del Incremento 1
 
-Criterio de terminado del Incremento 1 (tabla 3.3): funcionan las cuatro peticiones de ejemplo, una aplicación externa se suscribe al `.ics` y el módulo tiene README. Se ejecuta desde el móvil, contra el chat del core (`http://<ip-servidor>:<puerto>`), con el calendario vacío o con datos de prueba. Anotar para cada paso: resultado (OK / fallo), herramienta y argumentos que aparecen en la traza, tiempo de respuesta y observaciones.
+Criterio de terminado del Incremento 1 (tabla 3.3): funcionan las cuatro peticiones de ejemplo, una aplicación externa se suscribe al `.ics` y el módulo tiene README. Se ejecuta desde el móvil, con el chat flotante de Mortimer (botón «Mortimer» abajo a la derecha, en `http://<ip-servidor>:<puerto>` o en la propia página del calendario), con el calendario vacío o con datos de prueba. Anotar para cada paso: resultado (OK / fallo), herramienta y argumentos que aparecen en la traza, tiempo de respuesta y observaciones.
 
 **Preparación.** En el frontend (`/m/calendario/ui`) crear a mano dos eventos que se llamen parecido en días distintos de esta semana o la siguiente, por ejemplo «Clase de inglés» el martes a las 19:00 y «Clase de inglés (repaso)» el jueves a las 19:00, y un tercero cualquiera para hoy.
 
@@ -136,10 +145,12 @@ Criterio de terminado del Incremento 1 (tabla 3.3): funcionan las cuatro peticio
 | 2 | **Consultar la semana.** «¿qué tengo esta semana?» | `listar_eventos(periodo="esta semana")`. Respuesta agrupada por días con horas y títulos, que coincide con la vista de semana |
 | 3 | **Resumir el día.** «¿cómo tengo el día de hoy?» | `listar_eventos(periodo="hoy")`. Enumera el evento de hoy; si no hay nada, «No tienes nada el … (hoy).» |
 | 4 | **Cancelar una cita con dos candidatos.** «cancela la clase de inglés» | `cancelar_evento(titulo="inglés")` o similar. **No cancela nada** y pregunta cuál, con día y hora de las dos. En el frontend siguen las dos activas. Responder «la del jueves»: cancela solo esa, que pasa a «Cancelados» |
-| 5 | **Frontend.** Abrir `/m/calendario/ui` desde el enlace del chat | Semana actual, hoy destacado. Probar ‹ ›, «Hoy» y la vista de mes. Ningún enlace roto (todo cuelga de `/m/calendario/`) |
+| 5 | **Frontend.** Abrir `/m/calendario/ui` desde el mapa de módulos de la portada | Semana actual, hoy destacado. Probar ‹ ›, «Hoy» y la vista de mes. Ningún enlace roto (todo cuelga de `/m/calendario/`) |
 | 6 | **Editar a mano.** Pulsar el evento del taller, cambiar la hora a 11:30 y guardar | Aviso «Guardado: …». La vista muestra 11:30–12:30 |
 | 7 | **Cancelar y restaurar a mano.** «Cancelar este evento» y después «Restaurar» en «Cancelados» | Desaparece de la semana y vuelve al restaurar |
 | 8 | **Suscribir el calendario.** En «Ver el calendario en el móvil», copiar la dirección y seguir los pasos de iPhone (o ICSx⁵ en Android) | La app de calendario muestra «Mortimer» con los eventos de los pasos anteriores (el del taller a las 11:30). La actualización no es inmediata: forzarla desde la app si hace falta |
 | 9 | **Comprobar que cancelar no borra.** `sqlite3 -readonly data/calendario/calendario.db "SELECT titulo, cancelado_en FROM eventos"` en el servidor | La clase del jueves está con `cancelado_en` relleno; nada se ha borrado |
+| 10 | **La vista se refresca sola.** Con la semana abierta en `/m/calendario/ui`, abrir el chat flotante en esa misma página y escribir «apunta yoga el miércoles a las 8» | Respuesta de `crear_evento` y el evento aparece en la semana **sin recargar** la página. Con «¿qué hora es?» (no usa el calendario) la vista no se recarga |
+| 11 | **Registro.** Abrir la pestaña «Registro» | En «Peticiones a Mortimer», las frases de los pasos 1, 4 y 10 con sus llamadas y tiempos. En «Llamadas y cambios en el calendario», las llamadas de Mortimer (la del paso 4 marcada «preguntó») y los cambios a mano de los pasos 6 y 7. El filtro por origen funciona y «Vaciar este registro» borra la lista pero ningún evento |
 
-Capturas para la memoria: vista de semana tras el paso 1, la pregunta del paso 4, la vista de mes y el calendario suscrito en el móvil.
+Capturas para la memoria: vista de semana tras el paso 1 con el chat flotante abierto, la pregunta del paso 4, la vista de mes, la pestaña Registro tras el paso 11 y el calendario suscrito en el móvil.

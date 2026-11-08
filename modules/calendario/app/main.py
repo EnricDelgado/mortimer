@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Annotated, Any, Callable, TypedDict
@@ -77,6 +78,22 @@ class Resultado(TypedDict):
     texto: str
     final: bool
     datos: dict[str, Any]
+
+
+def _llamada(servicio: Calendario, nombre: str, argumentos: dict[str, Any],
+             funcion: Callable[[], dict[str, Any]]) -> CallToolResult:
+    """Ejecuta una herramienta y la anota en el registro de actividad (canal 'chat')."""
+    t = time.perf_counter()
+    try:
+        r = funcion()
+    except Exception as e:
+        servicio.anotar("chat", nombre, argumentos, f"{type(e).__name__}: {e}", "error",
+                        ms=(time.perf_counter() - t) * 1000)
+        raise
+    estado, evento_id = Calendario.estado_de(r)
+    servicio.anotar("chat", nombre, argumentos, r["texto"], estado, evento_id,
+                    (time.perf_counter() - t) * 1000)
+    return _a_mcp(r)
 
 
 def _a_mcp(r: dict[str, Any]) -> CallToolResult:
@@ -159,7 +176,9 @@ def crear_servidor(servicio: Calendario) -> MCPServer:
         ubicacion: Annotated[str, Field(description="Lugar, solo si el usuario lo dice.")] = "",
     ) -> Annotated[CallToolResult, Resultado]:
         """Crea un evento en el calendario. Úsala también cuando el usuario cuenta que tiene algo o que ha quedado ('tengo dentista el martes', 'quedo con Pau el sábado'). No la uses para mover un evento que ya existe (eso es editar_evento) ni para cosas que no son del calendario, como mandar mensajes o recomendar algo."""
-        return _a_mcp(servicio.crear(titulo, dia, _texto(hora), _texto(hora_fin), ubicacion))
+        args = {"titulo": titulo, "dia": dia, "hora": hora, "hora_fin": hora_fin, "ubicacion": ubicacion}
+        return _llamada(servicio, "crear_evento", args,
+                        lambda: servicio.crear(titulo, dia, _texto(hora), _texto(hora_fin), ubicacion))
 
     @mcp.tool(meta=META["listar_eventos"])
     def listar_eventos(
@@ -169,7 +188,7 @@ def crear_servidor(servicio: Calendario) -> MCPServer:
             "o un día ('viernes', '3 de noviembre')."))],
     ) -> Annotated[CallToolResult, Resultado]:
         """Consulta la agenda del usuario en un periodo: qué tiene hoy, mañana, esta semana, etc."""
-        return _a_mcp(servicio.listar(periodo))
+        return _llamada(servicio, "listar_eventos", {"periodo": periodo}, lambda: servicio.listar(periodo))
 
     @mcp.tool(meta=META["cancelar_evento"])
     def cancelar_evento(
@@ -178,7 +197,8 @@ def crear_servidor(servicio: Calendario) -> MCPServer:
         id: Annotated[str, Field(description="Identificador del evento, solo si aparece en una respuesta anterior.")] = "",
     ) -> Annotated[CallToolResult, Resultado]:
         """Cancela un evento del calendario identificado por su título y, si se dice, su día. Si varios encajan, no cancela nada y pregunta cuál."""
-        return _a_mcp(servicio.cancelar(titulo, dia, id))
+        return _llamada(servicio, "cancelar_evento", {"titulo": titulo, "dia": dia, "id": id},
+                        lambda: servicio.cancelar(titulo, dia, id))
 
     @mcp.tool(meta=META["editar_evento"])
     def editar_evento(
@@ -192,8 +212,11 @@ def crear_servidor(servicio: Calendario) -> MCPServer:
         nuevo_titulo: Annotated[str, Field(description="Nuevo nombre, solo si el usuario lo quiere cambiar.")] = "",
     ) -> Annotated[CallToolResult, Resultado]:
         """Mueve o cambia un evento que ya existe: otro día, otra hora u otro nombre ('pasa el yoga al jueves', 'retrasa el dentista a las 17:00'). Si varios encajan, no cambia nada y pregunta cuál."""
-        return _a_mcp(servicio.editar_por_chat(titulo, dia, nuevo_dia, _texto(nueva_hora),
-                                               _texto(nueva_hora_fin), nuevo_titulo))
+        args = {"titulo": titulo, "dia": dia, "nuevo_dia": nuevo_dia, "nueva_hora": nueva_hora,
+                "nueva_hora_fin": nueva_hora_fin, "nuevo_titulo": nuevo_titulo}
+        return _llamada(servicio, "editar_evento", args,
+                        lambda: servicio.editar_por_chat(titulo, dia, nuevo_dia, _texto(nueva_hora),
+                                                         _texto(nueva_hora_fin), nuevo_titulo))
 
     @mcp.tool(meta=META["buscar_huecos"])
     def buscar_huecos(
@@ -201,7 +224,8 @@ def crear_servidor(servicio: Calendario) -> MCPServer:
         duracion_min: Annotated[Entero, Field(description="Duración en minutos (una hora = 60).")],
     ) -> Annotated[CallToolResult, Resultado]:
         """Busca tiempo libre en un día para una duración dada. Solo cuando el usuario pregunta explícitamente si tiene tiempo libre o un hueco. Para apuntar un plan ('quedo con Pau el sábado') usa crear_evento."""
-        return _a_mcp(servicio.huecos(dia, duracion_min))
+        return _llamada(servicio, "buscar_huecos", {"dia": dia, "duracion_min": duracion_min},
+                        lambda: servicio.huecos(dia, duracion_min))
 
     _registrar_rutas(mcp, servicio)
     web.registrar_rutas(mcp, servicio)
@@ -285,6 +309,7 @@ def _registrar_rutas(mcp: MCPServer, servicio: Calendario) -> None:
         r = servicio.alta_directa(d.get("titulo", ""), d.get("inicio"), d.get("fin"),
                                   a_bool(d.get("todo_el_dia", False)), d.get("ubicacion") or "",
                                   d.get("notas") or "", origen="usuario")
+        servicio.anotar("api", "alta", d, f"Añadido: '{r['evento']['titulo']}'", evento_id=r["evento"]["id"])
         return JSONResponse(r, status_code=201)
 
     @mcp.custom_route("/api/eventos/{id}", methods=["GET", "PATCH"])
@@ -294,19 +319,26 @@ def _registrar_rutas(mcp: MCPServer, servicio: Calendario) -> None:
         if request.method == "GET":
             return JSONResponse(servicio.obtener(id))
         # editar(id, /, **campos): un "id" en el cuerpo acaba en 400 (QA A-05).
-        return JSONResponse(servicio.editar(id, **await _json(request)))
+        cambios = await _json(request)
+        r = servicio.editar(id, **cambios)
+        servicio.anotar("api", "editar", cambios, f"Guardado: '{r['evento']['titulo']}'", evento_id=id)
+        return JSONResponse(r)
 
     @mcp.custom_route("/api/eventos/{id}/cancelar", methods=["POST"])
     @_api
     async def cancelar(request: Request) -> Response:
         _sin_cuerpo_o_json(request)
-        return JSONResponse({"evento": servicio.cancelar_por_id(request.path_params["id"])})
+        ev = servicio.cancelar_por_id(request.path_params["id"])
+        servicio.anotar("api", "cancelar", {"id": ev["id"]}, f"Cancelado: '{ev['titulo']}'", evento_id=ev["id"])
+        return JSONResponse({"evento": ev})
 
     @mcp.custom_route("/api/eventos/{id}/restaurar", methods=["POST"])
     @_api
     async def restaurar(request: Request) -> Response:
         _sin_cuerpo_o_json(request)
-        return JSONResponse({"evento": servicio.restaurar(request.path_params["id"])})
+        ev = servicio.restaurar(request.path_params["id"])
+        servicio.anotar("api", "restaurar", {"id": ev["id"]}, f"Restaurado: '{ev['titulo']}'", evento_id=ev["id"])
+        return JSONResponse({"evento": ev})
 
     @mcp.custom_route("/api/reset", methods=["POST"])
     @_api
@@ -315,7 +347,9 @@ def _registrar_rutas(mcp: MCPServer, servicio: Calendario) -> None:
         if os.environ.get("CALENDARIO_PERMITIR_RESET", "") != "1":
             return _error("Reset deshabilitado (CALENDARIO_PERMITIR_RESET != 1)", 403)
         d = await _json(request)
-        return JSONResponse({"eventos": servicio.reset(d.get("eventos", []))})
+        n = servicio.reset(d.get("eventos", []))
+        servicio.anotar("api", "reset", {"eventos": n}, f"Calendario reiniciado con {n} eventos")
+        return JSONResponse({"eventos": n})
 
 
 # ── Aplicación ASGI ───────────────────────────────────────────────────────

@@ -32,7 +32,8 @@ def test_crea_esquema_en_modo_wal(db):
     con = sqlite3.connect(db.ruta)
     assert con.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
     tablas = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-    assert tablas == {"eventos"}  # sin calendarios_externos (RF-07 recortado)
+    tablas.discard("sqlite_sequence")
+    assert tablas == {"eventos", "actividad"}  # sin calendarios_externos (RF-07 recortado)
     columnas = {r[1] for r in con.execute("PRAGMA table_info(eventos)")}
     assert {"todo_el_dia", "cancelado_en", "origen"} <= columnas
 

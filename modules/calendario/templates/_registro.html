@@ -1,0 +1,74 @@
+{# Pestaña «Registro». Es también lo que devuelve /ui/registro con htmx. Todas las URL son relativas. #}
+{% if aviso %}
+<div id="aviso" class="aviso {{ aviso.tipo }}" role="{{ 'alert' if aviso.tipo == 'error' else 'status' }}">
+  <span>{{ aviso.texto }}</span>
+  <button type="button" class="cerrar" onclick="this.parentElement.remove()" aria-label="Cerrar aviso">×</button>
+</div>
+{% endif %}
+
+<div class="cabecera-vista">
+  <h1>Registro</h1>
+</div>
+<p class="pista intro">Qué le has pedido a Mortimer sobre el calendario, qué herramientas ha usado para responderte y qué has cambiado a mano.</p>
+
+<section class="bloque" aria-labelledby="t-peticiones">
+  <div class="bloque-cabecera">
+    <h2 id="t-peticiones">Peticiones a Mortimer</h2>
+    <button type="button" class="secundario pequeno" onclick="cargarPeticiones()">Actualizar</button>
+  </div>
+  <p class="pista">Las peticiones del chat que han usado el calendario, con la respuesta y el tiempo que tardó.</p>
+  <div id="peticiones" data-core="{{ raiz }}../../" data-modulo="calendario" aria-live="polite">
+    <p class="vacio">Cargando…</p>
+  </div>
+</section>
+
+<section class="bloque" aria-labelledby="t-actividad">
+  <div class="bloque-cabecera">
+    <h2 id="t-actividad">Llamadas y cambios en el calendario</h2>
+  </div>
+  <nav class="filtros" aria-label="Filtrar por origen">
+    {% for f in filtros %}
+    <a class="filtro{% if f.valor == canal %} actual{% endif %}"{% if f.valor == canal %} aria-current="page"{% endif %}
+       href="{{ raiz }}ui/registro{% if f.valor %}?canal={{ f.valor }}{% endif %}"
+       hx-get="{{ raiz }}ui/registro{% if f.valor %}?canal={{ f.valor }}{% endif %}" hx-target="#vista" hx-push-url="true">{{ f.etiqueta }} <span class="contador">{{ f.n }}</span></a>
+    {% endfor %}
+  </nav>
+
+  {% if entradas %}
+  <ol class="registro">
+    {% for e in entradas %}
+    <li class="entrada {{ e.estado }}">
+      <div class="entrada-cabecera">
+        <time datetime="{{ e.fecha }}"><span class="dia-reg">{{ e.dia }}</span> {{ e.hora }}</time>
+        <span class="chip canal-{{ e.canal }}">{{ e.canal_etiqueta }}</span>
+        <span class="operacion">{{ e.etiqueta }}</span>
+        {% if e.estado == 'pregunta' %}<span class="chip estado-pregunta" title="No cambió nada: pidió un dato o que eligieras">preguntó</span>{% endif %}
+        {% if e.estado == 'error' %}<span class="chip estado-error">error</span>{% endif %}
+        {% if e.ms is not none %}<span class="ms">{{ '%.0f'|format(e.ms) }} ms</span>{% endif %}
+      </div>
+      {% if e.llamada %}<code class="llamada">→ {{ e.llamada }}</code>{% endif %}
+      {% if e.campos %}<p class="campos-registro">{{ e.campos }}</p>{% endif %}
+      {% if e.resultado %}<p class="resultado">{{ e.resultado }}</p>{% endif %}
+      {% if e.enlace %}<a class="ver" href="{{ raiz }}{{ e.enlace.href }}">Ver «{{ e.enlace.titulo }}» en el calendario{% if e.enlace.cancelado %} (cancelado){% endif %}</a>{% endif %}
+    </li>
+    {% endfor %}
+  </ol>
+  <div class="acciones pie-registro">
+    {% if paginado %}<a class="boton secundario" href="{{ raiz }}{{ volver_registro }}">Más recientes</a>{% endif %}
+    {% if siguiente %}<a class="boton secundario" href="{{ raiz }}{{ siguiente }}">Anteriores</a>{% endif %}
+  </div>
+  {% else %}
+  <p class="vacio">{% if canal %}No hay nada con este filtro.{% else %}Todavía no hay actividad. Pídele algo a Mortimer o añade un evento.{% endif %}</p>
+  {% endif %}
+
+  {% if filtros[0].n %}
+  <form class="vaciar" method="post" action="{{ raiz }}ui/registro/vaciar"
+        hx-post="{{ raiz }}ui/registro/vaciar" hx-target="#vista"
+        hx-confirm="¿Vaciar el registro del calendario? Los eventos no se tocan."
+        onsubmit="return window.htmx ? true : confirm('¿Vaciar el registro del calendario? Los eventos no se tocan.')">
+    <input type="hidden" name="raiz" value="{{ raiz }}">
+    <button type="submit" class="secundario peligro">Vaciar este registro</button>
+    <span class="pista">Borra solo esta lista. Las peticiones a Mortimer se gestionan desde la portada de Mortimer.</span>
+  </form>
+  {% endif %}
+</section>

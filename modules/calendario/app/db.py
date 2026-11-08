@@ -19,6 +19,7 @@ módulo (por ejemplo, para listar sus herramientas) no toca el disco.
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
@@ -38,10 +39,27 @@ CREATE TABLE IF NOT EXISTS eventos (
     cancelado_en TEXT                     -- borrado lógico: NULL = activo
 );
 CREATE INDEX IF NOT EXISTS eventos_inicio ON eventos (inicio);
+
+-- Registro de actividad del módulo: cada llamada a una herramienta (desde
+-- Mortimer) y cada cambio hecho a mano en el frontend o por la API. Es lo que
+-- enseña la pestaña «Registro» del frontend. No es la fuente de la
+-- evaluación (esa es la tabla `interacciones` del core).
+CREATE TABLE IF NOT EXISTS actividad (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    fecha        TEXT NOT NULL,           -- ISO 8601 con zona, hora local
+    canal        TEXT NOT NULL,           -- 'chat' (herramienta MCP) | 'manual' (frontend) | 'api'
+    operacion    TEXT NOT NULL,           -- 'crear_evento', 'editar', 'cancelar'...
+    argumentos   TEXT NOT NULL,           -- JSON
+    resultado    TEXT,                    -- frase devuelta o aviso mostrado
+    estado       TEXT NOT NULL,           -- 'ok' | 'pregunta' | 'error'
+    evento_id    TEXT,                    -- evento afectado, si lo hay
+    ms           REAL
+);
 """
 
 CAMPOS = ("id", "titulo", "inicio", "fin", "todo_el_dia", "ubicacion", "notas",
           "origen", "creado_en", "cancelado_en")
+CANALES = ("chat", "manual", "api")
 EDITABLES = ("titulo", "inicio", "fin", "todo_el_dia", "ubicacion", "notas")
 
 
@@ -183,3 +201,50 @@ class BaseDatos:
         with self._conexion() as con:
             con.execute("DELETE FROM eventos")
             con.executemany(self._INSERT, [self._valores(e) for e in eventos])
+
+    # ── Registro de actividad ────────────────────────────────────────────────
+
+    def registrar_actividad(self, fecha: str, canal: str, operacion: str, argumentos: dict[str, Any],
+                            resultado: str, estado: str, evento_id: str | None = None,
+                            ms: float | None = None) -> int:
+        with self._conexion() as con:
+            cur = con.execute(
+                "INSERT INTO actividad (fecha, canal, operacion, argumentos, resultado, estado, evento_id, ms)"
+                " VALUES (?,?,?,?,?,?,?,?)",
+                (fecha, canal, operacion, json.dumps(argumentos, ensure_ascii=False, default=str),
+                 resultado, estado, evento_id, ms),
+            )
+            return int(cur.lastrowid)
+
+    def actividad(self, canal: str | None = None, limite: int = 100,
+                  antes_de: int | None = None) -> list[dict[str, Any]]:
+        """Entradas del registro, de la más reciente a la más antigua."""
+        condiciones, params = [], []
+        if canal:
+            condiciones.append("canal = ?")
+            params.append(canal)
+        if antes_de is not None:
+            condiciones.append("id < ?")
+            params.append(antes_de)
+        where = ("WHERE " + " AND ".join(condiciones)) if condiciones else ""
+        with self._conexion() as con:
+            filas = con.execute(f"SELECT * FROM actividad {where} ORDER BY id DESC LIMIT ?",
+                                (*params, limite)).fetchall()
+        res = []
+        for f in filas:
+            d = dict(f)
+            try:
+                d["argumentos"] = json.loads(d["argumentos"])
+            except (TypeError, ValueError):
+                d["argumentos"] = {}
+            res.append(d)
+        return res
+
+    def contar_actividad(self) -> dict[str, int]:
+        with self._conexion() as con:
+            filas = con.execute("SELECT canal, COUNT(*) FROM actividad GROUP BY canal").fetchall()
+        return {f[0]: f[1] for f in filas}
+
+    def vaciar_actividad(self) -> int:
+        with self._conexion() as con:
+            return con.execute("DELETE FROM actividad").rowcount
