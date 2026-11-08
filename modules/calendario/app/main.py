@@ -144,10 +144,31 @@ _ACCIONES_FUERA = (r"\b(manda\w*|envia\w*|whatsapp|sms|telegram|correo|e-?mail|"
                    r"recomienda\w*|recomiendame)\b")
 _MOVER = (r"\b(pasa|pasalo|pasala|mueve\w*|cambia\w*|retrasa\w*|adelanta\w*|aplaza\w*|"
           r"traslada\w*|renombra\w*|modifica\w*|edita\w*|corrige\w*)\b")
+# DA-17 (F1.0): el core también usa `requiere` ANTES de llamar al modelo, para
+# despertar el módulo solo cuando el mensaje tiene que ver con él ("hola" no
+# debe llevar las herramientas del calendario). Por eso crear_evento y
+# listar_eventos, que antes no lo declaraban, lo declaran ahora. Las
+# expresiones pecan de amplias a propósito: si el módulo se despierta de más,
+# el modelo todavía puede no llamar a nada; si se despierta de menos, se pierde
+# la petición.
+_NUM = r"(\d{1,2}|una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|once|doce)"
+_TEMPORAL = (r"\b(hoy|manana|pasado manana|ayer|lunes|martes|miercoles|jueves|viernes|sabado|domingo|"
+             r"finde|fin de semana|semana|mes|enero|febrero|marzo|abril|mayo|junio|julio|agosto|"
+             r"septiembre|setiembre|octubre|noviembre|diciembre|mediodia|medianoche|"
+             r"esta (tarde|noche)|\d{1,2}/\d{1,2}|\d{4}-\d{2}-\d{2}|\d{1,2}:\d{2}|\d{1,2} ?h|"
+             rf"a las? {_NUM}|de {_NUM} a {_NUM})\b")
+_AGENDA = (r"\b(agenda|calendario|eventos?|citas?|reunion\w*|cumple\w*|planes|plan|"
+           r"recordatorios?|recuerdame|recuerda\w*)\b")
+_ALTA = (r"\b(apunt\w*|anot\w*|anad\w*|agend\w*|reserv\w*|program\w*|crea|crear|creame|"
+         r"tengo|quedo|quedamos|he quedado|me toca)\b")
+_CONSULTA = (r"\b(que tengo|tengo algo|que hay|hay algo|que planes|cuando (es|tengo|era)|"
+             r"a que hora|consulta\w*|mira\w*|dime|lista\w*|ensename|muestrame)\b")
 META: dict[str, dict[str, Any]] = {
     "crear_evento": {"mortimer": {"fechas": {"dia": "dia"},
+                                  "requiere": [_ALTA, _TEMPORAL, _AGENDA],
                                   "excluye": [_ACCIONES_FUERA, _MOVER + r".*\b(a|al|para)\b"]}},
-    "listar_eventos": {"mortimer": {"fechas": {"periodo": "periodo"}}},
+    "listar_eventos": {"mortimer": {"fechas": {"periodo": "periodo"},
+                                    "requiere": [_CONSULTA, _TEMPORAL, _AGENDA]}},
     "cancelar_evento": {"mortimer": {
         "fechas": {"dia": "dia"},
         "requiere": [r"\b(cancel\w*|anul\w*|borr\w*|elimin\w*|quit\w*|suprim\w*|desapunt\w*|"

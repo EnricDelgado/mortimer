@@ -190,3 +190,40 @@ def test_huecos_solo_si_se_pregunta_por_tiempo_libre(texto, si):
 ])
 def test_cancelar_solo_si_se_pide(texto, si):
     assert _encaja("cancelar_evento", "requiere", texto) is si
+
+
+# ── DA-17 (F1.0): el core despierta el módulo solo si el mensaje va con él ──
+
+_CHARLA = ["hola mortimer", "que he mencionado?", "esta alucinando", "Hola, ¿qué tal?",
+           "¿qué tal el día?", "nada, aquí aburrido", "¿Qué sabes hacer?", "Pon música relajante",
+           "Explícame qué es el protocolo MCP", "gracias!", "me llamo Enric", "cuéntame un chiste"]
+
+
+@pytest.mark.parametrize("texto", _CHARLA)
+def test_la_charla_no_despierta_el_calendario(texto):
+    for herramienta, meta in META.items():
+        requiere = meta["mortimer"].get("requiere")
+        assert requiere, f"{herramienta} debe declarar requiere (DA-17)"
+        assert not _encaja(herramienta, "requiere", texto), (herramienta, texto)
+
+
+@pytest.mark.parametrize("texto", [
+    "Apúntame comida con Laura el miércoles a las dos y media",
+    "Tengo el veterinario pasado mañana a las 9",
+    "El viernes tengo tutoría de 11 a 12 en la facultad",
+    "Pon que el domingo es el cumpleaños de Jordi",
+    "Ponme una cita con el médico",
+    "Añade una reunión con Marc el 20 de noviembre a las 10 en la sala 3",
+    "quedo con Pau el sabdo a mediodia",
+    "Apúntame algo para el jueves",
+])
+def test_las_altas_despiertan_crear_evento(texto):
+    assert _encaja("crear_evento", "requiere", texto)
+
+
+@pytest.mark.parametrize("texto", [
+    "¿Qué planes tengo para mañana?", "¿Qué tengo esta semana?", "enséñame la agenda",
+    "¿Cuándo es la cena con Marta?", "¿tengo algo el finde?", "que tengo la smana que viene",
+])
+def test_las_consultas_despiertan_listar_eventos(texto):
+    assert _encaja("listar_eventos", "requiere", texto)

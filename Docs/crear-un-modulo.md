@@ -32,7 +32,9 @@ navegador ─► core /m/<modulo>/<ruta> ─► módulo  GET /<ruta>   (frontend
 3. El **nombre del módulo** es el nombre del servidor MCP (`MCPServer("calendario", ...)`). Es el que aparece en el mapa de módulos y en el proxy: `/m/calendario/ui`.
 4. Los nombres de herramienta **no llevan prefijo**: el modelo ve `crear_evento`, no `calendario__crear_evento`. Si dos módulos publican el mismo nombre, el core se queda con el primero y descarta el segundo con un aviso en el log.
 5. Si un módulo no responde al arrancar, el core sigue sin él y lo reintenta cada 15 segundos. También se puede forzar con `POST /api/modulos/recargar`.
-6. En cada petición del usuario, el modelo elige herramienta y argumentos. El core comprueba la llamada con los metadatos del módulo (sección 5), la ejecuta con `tools/call` y, si el módulo ya redactó la respuesta, se la enseña al usuario sin volver a llamar al modelo (sección 4).
+6. En cada petición del usuario, el core **despierta** solo los módulos cuyas herramientas encajan con el mensaje, según su `requiere` y `excluye` (DA-17, sección 4.4). Si no encaja ninguna, el modelo contesta sin herramientas: es charla, o algo que Mortimer no sabe hacer.
+7. El modelo ve la lista de módulos instalados con la frase de `instructions` de cada uno («Tus módulos instalados: …»). Con ella contesta a «¿qué sabes hacer?» y, si le piden algo que no cubre ningún módulo, responde «No tengo ningún módulo para eso». El core lo apunta en «Lo que aún no sé hacer», en la portada.
+8. Con las herramientas despiertas, el modelo elige herramienta y argumentos. El core comprueba la llamada con los metadatos del módulo (sección 5), la ejecuta con `tools/call` y, si el módulo ya redactó la respuesta, se la enseña al usuario sin volver a llamar al modelo (sección 4).
 
 ## 3. Lista de comprobación del contrato
 
@@ -40,6 +42,8 @@ navegador ─► core /m/<modulo>/<ruta> ─► módulo  GET /<ruta>   (frontend
 |---|---|---|
 | Obligatorio | Servidor MCP con transporte *streamable HTTP* en `POST /mcp`, puerto 8001 | `app/main.py`, `mcp.streamable_http_app(...)` |
 | Obligatorio | Nombre de servidor único, corto, en minúsculas y sin espacios | `MCPServer("calendario", version=..., instructions=...)` |
+| Obligatorio | `instructions`: una frase con lo que sabe hacer el módulo. Mortimer la usa para presentarse (DA-17) | «Calendario personal: crea, consulta y cancela eventos y busca huecos libres.» |
+| Obligatorio | `requiere` en `meta.mortimer` de **cada** herramienta: sin él, la herramienta se ofrece al modelo en todos los mensajes, también en un «hola» (DA-17) | `META` en `app/main.py` |
 | Obligatorio | Herramientas con docstring y descripción de cada argumento | `crear_evento`, `listar_eventos`... |
 | Obligatorio | `GET /health` → `{"modulo", "version", "estado": "ok"}` | `_registrar_rutas` |
 | Obligatorio | Protección contra *DNS rebinding* con `ALLOWED_HOSTS` | `crear_app()` y `FiltroHost` |
@@ -47,7 +51,7 @@ navegador ─► core /m/<modulo>/<ruta> ─► módulo  GET /<ruta>   (frontend
 | Obligatorio | `README.md` del módulo: herramientas, frontend, rutas, variables y datos | `modules/calendario/README.md` |
 | Obligatorio | `Dockerfile` y servicio en `docker-compose.yml` sin `ports:` | servicio `calendario` |
 | Recomendado | Respuesta `{"texto", "final", "datos"}` con `final: true` | `_a_mcp()` |
-| Recomendado | Metadatos `meta.mortimer` (`fechas`, `requiere`, `excluye`) | `META` en `app/main.py` |
+| Recomendado | Resto de metadatos `meta.mortimer` (`fechas`, `excluye`) | `META` en `app/main.py` |
 | Recomendado | Frontend en `GET /ui` con URLs relativas y el chat flotante del core | `app/web.py`, `templates/` |
 | Recomendado | Registro de actividad propio (pestaña «Registro») | tabla `actividad` |
 | Recomendado | Pruebas en memoria, sin Ollama | `tests/test_mcp.py` |
@@ -138,13 +142,13 @@ Los resultados de una herramienta son **datos**, no instrucciones. El prompt del
 
 ### 4.4 Declarar los metadatos `meta.mortimer`
 
-El core comprueba cada llamada antes de ejecutarla con lo que el módulo declara en `meta` (decisión DA-15, `core/app/argumentos.py`). El modelo no ve estos metadatos, y el core no sabe nada del módulo: solo aplica lo declarado.
+El core usa lo que el módulo declara en `meta` dos veces: **antes** de llamar al modelo, para decidir qué herramientas se le ofrecen (DA-17), y **después**, para comprobar la llamada antes de ejecutarla (DA-15, `core/app/argumentos.py`). El modelo no ve estos metadatos, y el core no sabe nada del módulo: solo aplica lo declarado.
 
 | Clave | Formato | Qué hace el core |
 |---|---|---|
 | `fechas` | `{"argumento": "dia" \| "periodo"}` | Si el mensaje del usuario contiene **una sola** expresión temporal, la usa en lugar de la que escribió el modelo. Si no contiene ninguna y el argumento es opcional, lo deja vacío. Declara como mucho un argumento |
-| `requiere` | lista de expresiones regulares | La herramienta solo se ejecuta si el mensaje actual (o el anterior del usuario) encaja con alguna |
-| `excluye` | lista de expresiones regulares | La herramienta no se ejecuta si el mensaje actual encaja con alguna |
+| `requiere` | lista de expresiones regulares | La herramienta solo se ofrece al modelo, y solo se ejecuta, si el mensaje encaja con alguna. El mensaje anterior del usuario solo cuenta si Mortimer acaba de hacer una pregunta («¿Cuál de las dos?» → «la del tinte»). **Obligatorio desde DA-17** |
+| `excluye` | lista de expresiones regulares | La herramienta no se ofrece ni se ejecuta si el mensaje actual encaja con alguna |
 
 Las expresiones se aplican al mensaje **en minúsculas y sin tildes** («miércoles» llega como «miercoles»). Si el core rechaza una llamada, se lo dice al modelo y le quita esa herramienta en la ronda siguiente.
 
@@ -160,7 +164,7 @@ META = {
 }
 ```
 
-Úsalos con cuidado: una expresión demasiado estricta deja sin herramienta frases que sí la necesitaban. Prueba con frases reales.
+Úsalos con cuidado. Una expresión demasiado estricta deja sin herramienta frases que sí la necesitaban, y eso es peor que una demasiado amplia: si el módulo se despierta de más, el modelo todavía puede no llamar a nada. Prueba con frases reales de los dos lados: peticiones que deben despertar el módulo y charla que no («hola», «¿qué tal?», «gracias»). El Calendario tiene un ejemplo en `tests/test_qa_staging.py` (`test_la_charla_no_despierta_el_calendario`).
 
 ### 4.5 Añadir `/health`
 

@@ -25,7 +25,7 @@ El modelo extrae expresiones tal como las dice el usuario ("el viernes", "17:00"
 
 Si `dia` llega con algo que no es una fecha («único», «séptimo»), `cancelar_evento` y `editar_evento` buscan solo por el título y **preguntan** antes de tocar nada. Una fecha imposible («31 de noviembre») se explica y no crea nada.
 
-Cada herramienta publica en `meta.mortimer` qué argumentos son fechas y con qué frases tiene sentido llamarla (`requiere`/`excluye`). El core usa esos metadatos para tomar la fecha del mensaje original del usuario y para rechazar llamadas que no encajan (DA-15, `core/app/argumentos.py`).
+Cada herramienta publica en `meta.mortimer` qué argumentos son fechas y con qué frases tiene sentido llamarla (`requiere`/`excluye`). El core usa esos metadatos para despertar el módulo solo cuando el mensaje tiene que ver con la agenda (DA-17: un «hola» no lleva las herramientas del calendario), para tomar la fecha del mensaje original del usuario y para rechazar llamadas que no encajan (DA-15, `core/app/argumentos.py`).
 
 Ejemplos de frases (propias, no son las del banco de evaluación):
 

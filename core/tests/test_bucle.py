@@ -133,20 +133,30 @@ async def test_historial_por_conversacion(memoria):
     r1 = await orq.responder("me llamo Enric")
     await orq.responder("¿cómo me llamo?", r1.conversacion)
     contenidos = [m["content"] for m in llm.recibido[1][0]]
-    assert any(c.endswith("] me llamo Enric") for c in contenidos)
+    # DA-17: el historial guarda el texto limpio, sin la fecha.
+    assert "me llamo Enric" in contenidos
 
 
-async def test_prompt_de_sistema_fijo_y_mensaje_sellado(memoria):
-    """El prefijo (sistema) no cambia entre peticiones: Ollama puede reutilizar su caché."""
+async def test_prompt_de_sistema_fijo_y_fecha_aparte(memoria):
+    """El prefijo (sistema) no cambia entre peticiones: Ollama puede reutilizar su caché.
+
+    DA-17: la fecha va en un mensaje de sistema justo antes del del usuario, no
+    pegada a su texto (el modelo la tomaba por algo que había dicho)."""
     registro = Registro([])
     await registro.actualizar()
     llm = LLMGuion([RespuestaLLM("a"), RespuestaLLM("b")])
     orq = Orquestador(llm, registro, memoria)
-    await orq.responder("uno")
-    await orq.responder("dos")
+    r1 = await orq.responder("uno")
+    await orq.responder("dos", r1.conversacion)
     assert llm.recibido[0][0][0] == llm.recibido[1][0][0]
     import re
-    assert re.match(r"^\[\w+ \d{2}/\d{2}/\d{4} \d{2}:\d{2}\] dos$", llm.recibido[1][0][-1]["content"])
+    mensajes = llm.recibido[1][0]
+    assert mensajes[-1] == {"role": "user", "content": "dos"}
+    assert mensajes[-2]["role"] == "system"
+    assert re.match(r"^Ahora es \w+ \d{2}/\d{2}/\d{4}, \d{2}:\d{2} ", mensajes[-2]["content"])
+    # La fecha de la petición anterior no queda en el historial.
+    assert [m["content"] for m in mensajes if m["role"] == "user"] == ["uno", "dos"]
+    assert sum(m["content"].startswith("Ahora es") for m in mensajes) == 1
 
 
 # ── DA-09: tope de longitud en la conversación libre ──────────────────────────

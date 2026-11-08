@@ -1,7 +1,7 @@
 """Core de Mortimer: frontend, API y registro de módulos.
 
 Frontend del core (Jinja2, sin dependencias externas, DA-04):
-  /                      mapa de módulos instalados
+  /                      mapa de módulos instalados y lo que aún no sabe hacer
   /conversaciones        registro de conversaciones, consultable y borrable
   /conversaciones/<id>   una conversación con las herramientas que invocó
 El chat con Mortimer es un widget flotante (static/chat-flotante.js) que se
@@ -36,6 +36,10 @@ from .registro import Registro
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 BASE = Path(__file__).resolve().parent
 plantillas = Jinja2Templates(directory=str(BASE.parent / "templates"))
+
+
+class CambioNecesidad(BaseModel):
+    estado: Literal["abierta", "descartada", "cubierta"]
 
 
 class Peticion(BaseModel):
@@ -150,6 +154,17 @@ def crear_app(config: Config | None = None, llm=None, destinos=None) -> FastAPI:
     async def interacciones(limite: int = 50, desde_id: int | None = None):
         return app.state.memoria.interacciones(limite, desde_id)
 
+    # ── Lo que Mortimer aún no sabe hacer (DA-17, F1.4) ───────────────────
+    @app.get("/api/necesidades")
+    async def api_necesidades(estado: str | None = None, limite: int = 200):
+        return app.state.memoria.necesidades(estado, limite)
+
+    @app.patch("/api/necesidades/{nid}")
+    async def api_marcar_necesidad(nid: int, cambio: CambioNecesidad):
+        if not app.state.memoria.marcar_necesidad(nid, cambio.estado):
+            raise HTTPException(404, "Necesidad no encontrada")
+        return {"id": nid, "estado": cambio.estado}
+
     @app.api_route("/m/{modulo}/{ruta:path}", methods=METODOS)
     async def proxy_modulo(request: Request, modulo: str, ruta: str):
         return await app.state.proxy.reenviar(request, modulo, ruta)
@@ -187,7 +202,13 @@ def crear_app(config: Config | None = None, llm=None, destinos=None) -> FastAPI:
         reg = app.state.registro
         return pagina(request, "inicio.html", "", seccion="modulos",
                       modulos=mapa_modulos(reg, app.state.memoria.uso_modulos()),
-                      n_herramientas=len(reg.herramientas))
+                      n_herramientas=len(reg.herramientas),
+                      necesidades=app.state.memoria.necesidades("abierta"))
+
+    @app.post("/necesidades/{nid}/{estado}")
+    async def marcar_necesidad_html(nid: int, estado: Literal["descartada", "cubierta"]):
+        app.state.memoria.marcar_necesidad(nid, estado)
+        return RedirectResponse("../../#necesidades", status_code=303)
 
     @app.post("/modulos/recargar")
     async def recargar_html():

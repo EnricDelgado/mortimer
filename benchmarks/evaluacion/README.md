@@ -62,6 +62,17 @@ Cada caso indica qué herramientas son aceptables y qué comprobaciones tienen q
 - Recursos durante la ejecución: `./scripts/evaluacion/monitor_recursos.sh 5 eval/recursos.csv &` antes y `kill %1` después; `python3 scripts/evaluacion/resumir.py recursos eval/recursos.csv` da la media y el pico de CPU y RAM por contenedor.
 - Pruebas del ejecutor (sin servidor, con dobles): `(cd benchmarks && pytest -q evaluacion/tests)`. Incluyen una que falla si `banco.py` cambia; al congelarlo (ENR-11) se actualiza su hash en `tests/test_ejecutar.py` en el mismo commit.
 
+## Conversación de varios turnos (DA-17)
+
+`conversacion.py` añade 6 casos de conversación entera (E-C01 a E-C06). El banco manda cada frase en una conversación nueva y solo mira la herramienta, así que no detectaba el fallo de staging del 08/11: con «hola mortimer» no se llamaba a nada, pero la respuesta hablaba de la agenda. Cada turno se puntúa por los módulos que se despertaron y por el contenido de la respuesta, con una lista de palabras prohibidas o requeridas (sin juez LLM). Mismas reglas que el banco. No necesita el reloj fijo ni toca la agenda:
+
+```bash
+.venv/bin/python benchmarks/evaluacion/conversacion.py --core http://localhost:8100 \
+  --repeticiones 3 --salida /srv/mortimer-staging/eval-conversacion
+```
+
+Criterios propuestos: **0** turnos de charla que mencionen la agenda o despierten un módulo, y E-C03, E-C04 y E-C05 correctos en las 3 repeticiones.
+
 ## Criterios de aceptación (PROPUESTA, se fijan al cerrar el Incremento 3)
 
 | Métrica | Propuesta | Justificación |

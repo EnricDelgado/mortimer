@@ -36,7 +36,7 @@ RAIZ = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RAIZ / "core"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from app.orquestador import DIAS, PROMPT_SISTEMA, sellar  # noqa: E402
+from app.orquestador import DIAS, PROMPT_SISTEMA, contexto_temporal  # noqa: E402
 from casos import CASOS, HERRAMIENTAS, HERRAMIENTAS_V2, REFERENCIA, RESULTADOS_SIMULADOS, a_canonico  # noqa: E402
 
 HERRAMIENTAS_ACTIVAS = HERRAMIENTAS
@@ -47,9 +47,13 @@ RE_HORA = re.compile(r"[T ](\d{1,2}):(\d{2})")
 
 
 def mensajes(frase: str) -> list[dict]:
-    # Idéntico a lo que envía el core: sistema fijo + mensaje sellado con la fecha.
+    # Como el core desde DA-17: sistema fijo, la fecha en un mensaje de sistema
+    # aparte y el mensaje del usuario limpio. El benchmark no lleva el bloque de
+    # módulos instalados (depende de los módulos registrados) ni filtra
+    # herramientas: mide la decisión del modelo con todas ellas.
     return [{"role": "system", "content": PROMPT_SISTEMA},
-            {"role": "user", "content": sellar(frase, REFERENCIA)}]
+            {"role": "system", "content": contexto_temporal(REFERENCIA, "Europe/Madrid")},
+            {"role": "user", "content": frase}]
 
 
 def comprobar(args: dict, check: tuple) -> bool:

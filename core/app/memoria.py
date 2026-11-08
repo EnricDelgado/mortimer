@@ -40,9 +40,23 @@ CREATE TABLE IF NOT EXISTS interacciones (
     error          TEXT,
     truncada       INTEGER NOT NULL DEFAULT 0,  -- 1 si la respuesta se cortó por num_predict (DA-09)
     t_decision_ms  REAL,                        -- duración de la primera llamada al LLM (DEV-10)
-    respuesta_modulo INTEGER NOT NULL DEFAULT 0 -- 1 si la respuesta la redactó el módulo (DA-11)
+    respuesta_modulo INTEGER NOT NULL DEFAULT 0, -- 1 si la respuesta la redactó el módulo (DA-11)
+    despiertas     TEXT NOT NULL DEFAULT '[]',     -- JSON: módulos ofrecidos al modelo (DA-17)
+    sin_capacidad  INTEGER NOT NULL DEFAULT 0      -- 1 si no había módulo para lo pedido (DA-17)
+);
+
+-- Lo que el usuario pidió y ningún módulo sabía hacer (DA-17, F1.4).
+CREATE TABLE IF NOT EXISTS necesidades (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    fecha          TEXT NOT NULL,
+    conversacion   TEXT NOT NULL,
+    interaccion_id INTEGER,
+    peticion       TEXT NOT NULL,
+    estado         TEXT NOT NULL DEFAULT 'abierta'  -- abierta | descartada | cubierta
 );
 """
+
+ESTADOS_NECESIDAD = ("abierta", "descartada", "cubierta")
 
 
 class Memoria:
@@ -62,7 +76,9 @@ class Memoria:
         columnas = {f["name"] for f in self._db.execute("PRAGMA table_info(interacciones)")}
         nuevas = {"truncada": "INTEGER NOT NULL DEFAULT 0",          # DA-09
                   "t_decision_ms": "REAL",                           # DEV-10
-                  "respuesta_modulo": "INTEGER NOT NULL DEFAULT 0"}  # DEV-07 / DA-11
+                  "respuesta_modulo": "INTEGER NOT NULL DEFAULT 0",  # DEV-07 / DA-11
+                  "despiertas": "TEXT NOT NULL DEFAULT '[]'",        # DA-17
+                  "sin_capacidad": "INTEGER NOT NULL DEFAULT 0"}     # DA-17
         for nombre, tipo in nuevas.items():
             if nombre not in columnas:
                 self._db.execute(f"ALTER TABLE interacciones ADD COLUMN {nombre} {tipo}")
@@ -89,6 +105,8 @@ class Memoria:
     def registrar(self, **campos: Any) -> int:
         campos.setdefault("fecha", self._ahora())
         campos["herramientas"] = json.dumps(campos.get("herramientas", []), ensure_ascii=False)
+        if "despiertas" in campos:
+            campos["despiertas"] = json.dumps(campos["despiertas"], ensure_ascii=False)
         columnas = ", ".join(campos)
         huecos = ", ".join("?" for _ in campos)
         cur = self._db.execute(
@@ -108,8 +126,34 @@ class Memoria:
         for f in filas:
             d = dict(f)
             d["herramientas"] = json.loads(d["herramientas"])
+            d["despiertas"] = json.loads(d.get("despiertas") or "[]")
             res.append(d)
         return res
+
+    # ── Necesidades no cubiertas (DA-17, F1.4) ────────────────────────────────
+
+    def registrar_necesidad(self, conversacion: str, interaccion_id: int | None, peticion: str) -> int:
+        cur = self._db.execute(
+            "INSERT INTO necesidades (fecha, conversacion, interaccion_id, peticion) VALUES (?,?,?,?)",
+            (self._ahora(), conversacion, interaccion_id, peticion),
+        )
+        self._db.commit()
+        return int(cur.lastrowid)
+
+    def necesidades(self, estado: str | None = None, limite: int = 200) -> list[dict[str, Any]]:
+        if estado:
+            filas = self._db.execute(
+                "SELECT * FROM necesidades WHERE estado=? ORDER BY id DESC LIMIT ?", (estado, limite))
+        else:
+            filas = self._db.execute("SELECT * FROM necesidades ORDER BY id DESC LIMIT ?", (limite,))
+        return [dict(f) for f in filas.fetchall()]
+
+    def marcar_necesidad(self, nid: int, estado: str) -> bool:
+        if estado not in ESTADOS_NECESIDAD:
+            raise ValueError(f"estado desconocido: {estado}")
+        cur = self._db.execute("UPDATE necesidades SET estado=? WHERE id=?", (estado, nid))
+        self._db.commit()
+        return cur.rowcount == 1
 
     # ── Registro de conversaciones (frontend del core) ────────────────────────
     # Lo que ve el usuario sale de `interacciones`: guarda la petición tal cual
@@ -159,6 +203,7 @@ class Memoria:
         """
         cur = self._db.execute("DELETE FROM interacciones WHERE conversacion=?", (conversacion,))
         self._db.execute("DELETE FROM mensajes WHERE conversacion=?", (conversacion,))
+        self._db.execute("DELETE FROM necesidades WHERE conversacion=?", (conversacion,))
         self._db.commit()
         return cur.rowcount
 
@@ -166,6 +211,7 @@ class Memoria:
         """Borra todas las conversaciones y su registro. Devuelve los turnos borrados."""
         cur = self._db.execute("DELETE FROM interacciones")
         self._db.execute("DELETE FROM mensajes")
+        self._db.execute("DELETE FROM necesidades")
         self._db.commit()
         return cur.rowcount
 

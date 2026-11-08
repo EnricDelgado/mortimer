@@ -20,6 +20,12 @@
            border-top:1px solid var(--borde); font-size:13px; color:var(--tenue); flex-wrap:wrap; }
     .pie .boton { font-size:13px; padding:4px 12px; }
     .aviso { font-size:13px; color:var(--error); margin:0; word-break:break-word; }
+    .necesidades { margin-top:32px; }
+    .necesidades ul { list-style:none; margin:12px 0 0; padding:0; display:flex; flex-direction:column; gap:8px; }
+    .necesidades li { background:var(--superficie); border:1px solid var(--borde); border-radius:12px; padding:10px 14px;
+                      display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+    .necesidades li .peticion { flex:1; min-width:200px; }
+    .necesidades li .boton { font-size:13px; padding:4px 12px; }
 {% endblock %}
 {% block contenido %}
 <div class="cabecera">
@@ -77,4 +83,27 @@
   <p>Mortimer puede conversar igualmente. Para añadir uno, ponlo en la variable <span class="mono">MODULOS</span> del core y pulsa «Buscar módulos de nuevo».</p>
 </div>
 {% endif %}
+
+<section class="necesidades" id="necesidades">
+  <h2>Lo que aún no sé hacer</h2>
+  <p class="sub">Peticiones para las que Mortimer no tenía ningún módulo. Sirven para decidir qué módulo buscar o crear a partir de la plantilla <span class="mono">modules/prueba</span>.</p>
+  {% if necesidades %}
+  <ul>
+    {% for n in necesidades %}
+    <li>
+      <span class="peticion">«{{ n.peticion }}»</span>
+      <span class="tenue">{{ n.fecha | local }}</span>
+      <form class="enlinea" method="post" action="{{ raiz }}necesidades/{{ n.id }}/cubierta">
+        <button class="boton" type="submit" title="Ya hay un módulo que lo hace">Ya lo sabe hacer</button>
+      </form>
+      <form class="enlinea" method="post" action="{{ raiz }}necesidades/{{ n.id }}/descartada">
+        <button class="boton" type="submit" title="No hace falta un módulo para esto">Descartar</button>
+      </form>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="tenue">Nada pendiente.</p>
+  {% endif %}
+</section>
 {% endblock %}

@@ -181,8 +181,10 @@ async def test_excluye_rechaza_y_quita_la_herramienta(registro, memoria, llamada
     assert llamadas == []
     assert r.texto == "No puedo mandar mensajes."
     assert r.herramientas[0]["ok"] is False and r.herramientas[0]["rechazada"]
-    ofrecidas = {h["function"]["name"] for h in llm.recibido[1][1]}
-    assert "apuntar" not in ofrecidas and "quitar" in ofrecidas
+    # DA-17: "apuntar" ya no se ofrece ni en la primera ronda (su `excluye`
+    # encaja), y en la segunda sigue fuera.
+    assert all("apuntar" not in {h["function"]["name"] for h in ofrecidas}
+               for _, ofrecidas in llm.recibido)
 
 
 async def test_requiere_usa_tambien_el_mensaje_anterior(registro, memoria, llamadas):  # CH-15
@@ -201,12 +203,13 @@ async def test_requiere_rechaza_sin_peticion(registro, memoria, llamadas):
 
 # ── DEV-10: reloj fijo ───────────────────────────────────────────────────────
 
-async def test_reloj_fijo_en_el_sello(memoria):
+async def test_reloj_fijo_en_el_contexto_temporal(memoria):
     registro = Registro([])
     await registro.actualizar()
     llm = LLMGuion([RespuestaLLM("ok")])
     await Orquestador(llm, registro, memoria, ahora_fijo="2026-10-29T18:00").responder("hola")
-    assert llm.recibido[0][0][-1]["content"] == "[jueves 29/10/2026 18:00] hola"
+    assert llm.recibido[0][0][-1]["content"] == "hola"
+    assert llm.recibido[0][0][-2]["content"].startswith("Ahora es jueves 29/10/2026, 18:00 ")
 
 
 def test_interacciones_desde_id(memoria):

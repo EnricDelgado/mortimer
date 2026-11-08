@@ -193,6 +193,34 @@ Desarrollo en el Mac (`scripts/dev.sh`, Ollama nativo); despliegue y medición e
 - El registro de actividad queda como parte **recomendada** del contrato de módulo, no obligatoria (`Docs/crear-un-modulo.md`, §4.8). Se revisará con el segundo módulo con datos (Vitácora).
 - Las capturas de la memoria hechas antes de este cambio muestran un chat provisional y hay que repetirlas.
 
+## DA-17 · Mortimer conversa; los módulos se despiertan solo cuando toca · 08/11/2026
+
+**Contexto.** El código ya seguía la idea de un solo asistente: un prompt, un modelo, un bucle de herramientas y una memoria, y los módulos sin LLM ni chat propio (DA-01, DA-16). Pero en staging (08/11) la charla básica no funcionaba. A «hola mortimer» contestaba «¿Necesitas algo más que lo que mencionaste?», y a las dos preguntas siguientes se inventaba el estado de la agenda **sin llamar a ninguna herramienta**. El análisis (`files/qa/analisis-conversacion-basica-2026-11-08.md`) encontró cuatro causas:
+1. La fecha iba pegada al mensaje (`[domingo 08/11/2026 12:01] hola mortimer`, DA-07), y el modelo la tomaba por algo que había dicho el usuario. El historial guardaba los mensajes con la fecha.
+2. El prompt de sistema solo hablaba de herramientas y del calendario. No decía nada de cómo conversar.
+3. Las herramientas de todos los módulos se ofrecían en todas las peticiones. Los filtros de DA-15 solo actuaban después de que el modelo pidiera una herramienta, y `crear_evento` y `listar_eventos` no los tenían.
+4. Mortimer no sabía qué módulos tenía (las `instructions` MCP se guardaban, pero no llegaban al prompt), ni qué hacer con lo que no sabía hacer.
+
+**Alternativas.**
+- A. Agente único con el catálogo completo de herramientas en cada petición (lo que había).
+- B. Un agente por módulo, con un enrutador delante. No cabe en 8 GB de RAM con un solo modelo cargado (DA-07), y rompe la idea de un solo Mortimer.
+- C. Una primera llamada al modelo que solo clasifique la petición. En CPU añade 3–6 s a cada petición (RNF-03), y un modelo de 3B también se equivoca al clasificar.
+- D. Agente único que **despierta** los módulos en código, con los `requiere`/`excluye` que ya declaran (DA-15), **antes** de llamar al modelo.
+- Para lo que no sabe hacer: D1, que el modelo empiece con una frase fija («No tengo ningún módulo para eso») y el core la detecte; o D2, una herramienta del core `registrar_necesidad`. D2 añade una herramienta que un modelo de 3B puede llamar de más, y obliga a cambiar lo que esperan E-N01 y E-N02 del banco.
+
+**Decisión.** D + D1.
+- **Fecha fuera del mensaje.** Va en un mensaje de sistema corto justo antes del último mensaje del usuario («Ahora es domingo 08/11/2026, 12:01 (Europe/Madrid). Úsalo solo si el usuario habla de fechas u horas.»), y no se guarda en el historial. El historial guarda el texto limpio. A los mensajes antiguos se les quita la fecha al leerlos.
+- **Despertar.** `Orquestador.despertar()` ofrece al modelo solo las herramientas cuyo `requiere` encaja con el mensaje, y sin `excluye` que lo impida. El mensaje anterior del usuario solo cuenta si Mortimer acaba de hacer una pregunta. Si no encaja ninguna, la ronda va sin herramientas. Una herramienta sin `requiere` se despierta siempre, para que un servidor MCP de terceros funcione; el contrato de módulo lo hace obligatorio. El Calendario declara ahora `requiere` en `crear_evento` y `listar_eventos`: verbos de alta o consulta, expresiones temporales y palabras de agenda. Comprobado con los 30 casos del banco y los 20 del spike: ninguna petición de calendario se queda sin despertar su herramienta, y ninguna frase de charla despierta el módulo.
+- **Prompt.** Tiene tres bloques: cómo conversa Mortimer («si el usuario solo saluda o charla, conversa con naturalidad; no le ofrezcas tareas ni hables de su agenda»), la lista de módulos instalados con la frase de cada uno, y las reglas de herramientas, ya sin nombrar el calendario. Solo cambia cuando cambian los módulos, así que la caché de prefijo se mantiene.
+- **Lo que no sabe hacer.** Si la respuesta, sin herramientas, empieza con «No tengo ningún módulo para eso», el core añade la sugerencia de buscar o crear un módulo, marca la interacción con `sin_capacidad = 1` y apunta la petición en la tabla `necesidades`. La portada la enseña en «Lo que aún no sé hacer», con botones para descartarla o darla por cubierta (`GET /api/necesidades`, `PATCH /api/necesidades/{id}`). Al borrar una conversación se borran también sus necesidades.
+- **Registro.** `interacciones` gana `despiertas` (módulos ofrecidos al modelo) y `sin_capacidad`.
+
+**Consecuencias.**
+- El benchmark de modelos (`benchmarks/benchmark_modelos.py`) usa el mismo formato: fecha aparte y mensaje limpio. Hay que repetirlo para comparar con el spike v2 (90 % / 71 %), igual que tras DA-15.
+- `benchmarks/evaluacion/conversacion.py` añade 6 casos de conversación de varios turnos (E-C01 a E-C06, entre ellos el de la captura), con criterio sobre el contenido: lista de palabras prohibidas o requeridas, sin juez LLM. Métricas nuevas: turnos de charla que mencionan la agenda y turnos de charla que despiertan algún módulo. Se congela con el banco (ENR-11).
+- Riesgo: perder *recall* si un `requiere` es demasiado estricto. Se mide con el banco en staging.
+- Queda fuera, como trabajo futuro: buscar módulos en un catálogo, generarlos a partir de la plantilla e instalarlos sin reiniciar.
+
 ## Pendiente
 
 - ~~Segunda ronda opcional~~: hecho en DEV-07 (DA-15).
