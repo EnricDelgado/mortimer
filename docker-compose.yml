@@ -49,5 +49,19 @@ services:
     volumes:
       - "${DATA_LOCAL:-./data}/calendario:/data"   # disco local, como la base del core
 
+  # Canal de Telegram (opcional): docker compose --profile telegram up -d
+  # No es un módulo: es otra forma de hablar con el mismo Mortimer. No publica
+  # puertos: llama a Telegram (long polling) y al core.
+  canal-telegram:
+    build: ./canales/telegram
+    profiles: [telegram]
+    restart: unless-stopped
+    environment:
+      TELEGRAM_TOKEN: ${TELEGRAM_TOKEN:-}
+      TELEGRAM_USUARIOS: ${TELEGRAM_USUARIOS:-}
+      CORE_URL: http://core:8000
+    volumes: ["${DATA_LOCAL:-./data}/telegram:/data"]
+    depends_on: [core]
+
 volumes:
   ollama:

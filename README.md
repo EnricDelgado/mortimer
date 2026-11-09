@@ -62,6 +62,7 @@ Para pararlo: `docker compose down` (no borra tus datos, que están en `data/`).
 |---|---|
 | `core/` | Núcleo: chat, elección de herramientas, registro de módulos y de conversaciones |
 | `modules/` | Módulos. `prueba` es la plantilla mínima; `calendario`, un módulo completo |
+| `canales/telegram/` | Canal de Telegram: otra forma de hablar con el mismo Mortimer (no es un módulo) |
 | `Docs/` | Documentación |
 | `benchmarks/` | Comparativa de modelos locales en castellano y banco de evaluación |
 | `scripts/` | Arranque en desarrollo, pruebas de humo y herramientas de evaluación |

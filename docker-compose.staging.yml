@@ -45,6 +45,20 @@ services:
       MORTIMER_AHORA: ${MORTIMER_AHORA:-}
     volumes: ["./data/calendario:/data"]      # SQLite del calendario de staging
 
+  # Canal de Telegram de staging: OTRO bot (Telegram no admite dos lectores del
+  # mismo token). docker compose -f docker-compose.staging.yml --profile telegram up -d
+  # Solo en la red de staging: "core" es el core de staging.
+  canal-telegram-stg:
+    build: ./canales/telegram
+    profiles: [telegram]
+    restart: "no"
+    environment:
+      TELEGRAM_TOKEN: ${TELEGRAM_TOKEN_STAGING:-}
+      TELEGRAM_USUARIOS: ${TELEGRAM_USUARIOS:-}
+      CORE_URL: http://core:8000
+    volumes: ["./data/telegram:/data"]
+    depends_on: [core]
+
 networks:
   prod:
     external: true

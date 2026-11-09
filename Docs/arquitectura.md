@@ -221,6 +221,24 @@ Desarrollo en el Mac (`scripts/dev.sh`, Ollama nativo); despliegue y medición e
 - Riesgo: perder *recall* si un `requiere` es demasiado estricto. Se mide con el banco en staging.
 - Queda fuera, como trabajo futuro: buscar módulos en un catálogo, generarlos a partir de la plantilla e instalarlos sin reiniciar.
 
+## DA-18 · Telegram como canal del core, no como módulo · 09/11/2026
+
+**Contexto.** En la versión con n8n, Telegram era la interfaz principal, pero nunca llegó a funcionar. En los requisitos, Telegram iba atado a la Bitácora (RF-08, alta de nota desde Telegram), y el plan del 30/10 lo dejó en *Won't* junto con ella. Sin embargo, es la forma más fácil de hablar con Mortimer desde fuera de casa: con *long polling* no hace falta abrir puertos, ni URL pública, ni VPN.
+
+**Alternativas.**
+- A. Una tarea en segundo plano dentro del core.
+- B. Un contenedor aparte (`canales/telegram/`) que hace de puente entre Telegram y `POST /api/chat` del core.
+
+**Decisión.** B. El canal no es un módulo: no aporta herramientas. Es otra forma de hablar con el mismo Mortimer (DA-17).
+- Se activa con un perfil de Compose (`--profile telegram`), así que está desactivado por defecto. No publica puertos.
+- Usa lista blanca de usuarios (`TELEGRAM_USUARIOS`) y un bot distinto en staging, porque Telegram no admite dos lectores del mismo token.
+- La conversación es `tg-<chat_id>`, y `/nueva` empieza otra. Las interacciones se registran con `canal = 'telegram'`.
+
+**Consecuencias.**
+- Telegram sale de *Won't*. RF-08 se apoyará en este canal cuando exista la Bitácora, sin cambios en él. RF-09 (audio) sí necesitará recibir notas de voz.
+- Privacidad: el texto de las peticiones pasa por los servidores de Telegram, aunque el modelo y los datos siguen en casa. Hay que declararlo en la memoria.
+- La evaluación no cambia: el banco usa `/api/chat` con el canal `api`.
+
 ## Pendiente
 
 - ~~Segunda ronda opcional~~: hecho en DEV-07 (DA-15).
